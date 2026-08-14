@@ -1,0 +1,66 @@
+name: Build Resi Zadatak APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "ResiZadatak-project.zip"
+      - ".github/workflows/build-apk.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Preuzmi repository
+        uses: actions/checkout@v6
+
+      - name: Podesi Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Podesi Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Instaliraj Android 37 SDK
+        run: |
+          sdkmanager "platform-tools" "platforms;android-37" "build-tools;37.0.0"
+
+      - name: Raspakuj Android projekat
+        run: |
+          rm -rf work
+          mkdir work
+          unzip -q ResiZadatak-project.zip -d work
+          test -f work/ResiZadatak/settings.gradle.kts
+
+      - name: Dodaj Gemini API key
+        working-directory: work/ResiZadatak
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          test -n "$GEMINI_API_KEY" || { echo "GEMINI_API_KEY secret nije postavljen"; exit 1; }
+          printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties
+          printf 'GEMINI_API_KEY=%s\n' "$GEMINI_API_KEY" >> local.properties
+
+      - name: Build APK
+        working-directory: work/ResiZadatak
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:assembleDebug --stacktrace
+
+      - name: Preimenuj APK
+        working-directory: work/ResiZadatak
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk \
+             app/build/outputs/apk/debug/ResiZadatak-debug.apk
+
+      - name: Sacuvaj APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: ResiZadatak-APK
+          path: work/ResiZadatak/app/build/outputs/apk/debug/ResiZadatak-debug.apk
+          if-no-files-found: error
