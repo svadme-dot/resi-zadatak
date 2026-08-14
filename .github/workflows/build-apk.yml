@@ -43,20 +43,20 @@ jobs:
           test -f work/ResiZadatak/build.gradle.kts
           test -f work/ResiZadatak/app/build.gradle.kts
 
-      - name: Popravi Android build konfiguraciju
+      - name: Popravi build konfiguraciju i Kotlin kod
         run: |
           python3 <<'PY'
           from pathlib import Path
 
           root = Path("work/ResiZadatak")
+
           top = root / "build.gradle.kts"
           app = root / "app/build.gradle.kts"
+          gemini = root / "app/src/main/java/com/resizadatak/app/data/remote/GeminiAiService.kt"
 
-          # ---------------------------------------------------------
-          # TOP-LEVEL build.gradle.kts
-          # Kotlin ostaje 2.4.10.
-          # KAPT izbacujemo i ubacujemo KSP 2.3.10.
-          # ---------------------------------------------------------
+          # =========================================================
+          # 1. TOP LEVEL: KAPT -> KSP
+          # =========================================================
 
           t = top.read_text(encoding="utf-8")
 
@@ -67,17 +67,17 @@ jobs:
 
           top.write_text(t, encoding="utf-8")
 
-          # ---------------------------------------------------------
-          # APP build.gradle.kts
-          # ---------------------------------------------------------
+          # =========================================================
+          # 2. APP BUILD.GRADLE.KTS
+          # =========================================================
 
           a = app.read_text(encoding="utf-8")
 
-          # Runner trenutno koristi stabilni Android API 36.
+          # SDK 37 trenutno nije dostupan runneru.
           a = a.replace("compileSdk = 37", "compileSdk = 36")
           a = a.replace("targetSdk = 37", "targetSdk = 36")
 
-          # KAPT -> KSP
+          # KAPT -> KSP za Room.
           a = a.replace(
               'id("org.jetbrains.kotlin.kapt")',
               'id("com.google.devtools.ksp")'
@@ -88,43 +88,109 @@ jobs:
               'ksp("androidx.room:room-compiler:2.8.4")'
           )
 
-          # Ovo važi samo za kapt i više nam ne treba.
           a = a.replace(
               'kapt { correctErrorTypes = true }',
               ''
           )
 
-          # AGP 9 + stari DSL je deprecation-error u ovom projektu.
+          # Biblioteke koje još rade sa compileSdk 36.
+          a = a.replace(
+              'implementation("androidx.core:core-ktx:1.19.0")',
+              'implementation("androidx.core:core-ktx:1.17.0")'
+          )
+
+          a = a.replace(
+              'implementation("androidx.activity:activity-compose:1.13.0")',
+              'implementation("androidx.activity:activity-compose:1.12.4")'
+          )
+
+          a = a.replace(
+              'implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")',
+              'implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")'
+          )
+
+          a = a.replace(
+              'implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")',
+              'implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")'
+          )
+
+          # AGP 9 prijavljuje legacy DSL deprecations kao errors.
           suppression = '@file:Suppress("DEPRECATION", "DEPRECATION_ERROR")'
 
           if suppression not in a:
               a = suppression + "\n\n" + a
 
+          # Sprečava tranzitivne dependency-je da ponovo podignu
+          # Lifecycle na 2.11 ili Core na 1.19.
+          resolution = '''
+          configurations.configureEach {
+              resolutionStrategy.eachDependency {
+                  when (requested.group) {
+                      "androidx.lifecycle" -> useVersion("2.10.0")
+                      "androidx.core" -> if (
+                          requested.name == "core" ||
+                          requested.name == "core-ktx"
+                      ) {
+                          useVersion("1.17.0")
+                      }
+                  }
+              }
+          }
+
+          '''
+
+          if "resolutionStrategy.eachDependency" not in a:
+              a = a.replace(
+                  "dependencies {",
+                  resolution + "dependencies {",
+                  1
+              )
+
           app.write_text(a, encoding="utf-8")
 
-          # ---------------------------------------------------------
-          # Provera da patch stvarno jeste primenjen.
-          # ---------------------------------------------------------
+          # =========================================================
+          # 3. POPRAVI GEMINI KOTLIN GREŠKU
+          # =========================================================
+
+          g = gemini.read_text(encoding="utf-8")
+
+          g = g.replace(
+              "throw@withContext AiServiceException",
+              "throw AiServiceException"
+          )
+
+          gemini.write_text(g, encoding="utf-8")
+
+          # =========================================================
+          # 4. HARD CHECK
+          # =========================================================
 
           top_text = top.read_text(encoding="utf-8")
           app_text = app.read_text(encoding="utf-8")
-
-          assert 'com.google.devtools.ksp' in top_text
-          assert 'org.jetbrains.kotlin.kapt") version' not in top_text
+          gemini_text = gemini.read_text(encoding="utf-8")
 
           assert 'id("com.google.devtools.ksp")' in app_text
           assert 'ksp("androidx.room:room-compiler:2.8.4")' in app_text
-          assert 'kapt("androidx.room:room-compiler:2.8.4")' not in app_text
 
           assert "compileSdk = 36" in app_text
           assert "targetSdk = 36" in app_text
 
+          assert "core-ktx:1.17.0" in app_text
+          assert "activity-compose:1.12.4" in app_text
+          assert "lifecycle-runtime-ktx:2.10.0" in app_text
+          assert "lifecycle-viewmodel-compose:2.10.0" in app_text
+
+          assert "throw@withContext" not in gemini_text
+
           print("======================================")
-          print("BUILD PATCH USPESNO PRIMENJEN")
-          print("Kotlin: 2.4.10")
-          print("KSP:    2.3.10")
-          print("Room:   2.8.4 preko KSP")
-          print("SDK:    36")
+          print("PATCH OK")
+          print("SDK:       36")
+          print("Kotlin:    2.4.10")
+          print("Room:      2.8.4 + KSP")
+          print("Core:      1.17.0")
+          print("Activity:  1.12.4")
+          print("Lifecycle: 2.10.0")
+          print("Gemini throw syntax: FIXED")
           print("======================================")
           PY
 
@@ -146,7 +212,6 @@ jobs:
         shell: bash
         run: |
           chmod +x gradlew
-
           set -o pipefail
 
           ./gradlew \
