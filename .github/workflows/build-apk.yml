@@ -9,6 +9,9 @@ on:
       - "ResiZadatak-project.zip"
       - ".github/workflows/build-apk.yml"
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -26,9 +29,9 @@ jobs:
       - name: Podesi Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Instaliraj Android 37 SDK
+      - name: Instaliraj Android 36 SDK
         run: |
-          sdkmanager "platform-tools" "platforms;android-37" "build-tools;37.0.0"
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Raspakuj Android projekat
         run: |
@@ -37,12 +40,25 @@ jobs:
           unzip -q ResiZadatak-project.zip -d work
           test -f work/ResiZadatak/settings.gradle.kts
 
+          sed -i 's/compileSdk = 37/compileSdk = 36/' \
+            work/ResiZadatak/app/build.gradle.kts
+
+          sed -i 's/targetSdk = 37/targetSdk = 36/' \
+            work/ResiZadatak/app/build.gradle.kts
+
+          grep -n "compileSdk" work/ResiZadatak/app/build.gradle.kts
+          grep -n "targetSdk" work/ResiZadatak/app/build.gradle.kts
+
       - name: Dodaj Gemini API key
         working-directory: work/ResiZadatak
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          test -n "$GEMINI_API_KEY" || { echo "GEMINI_API_KEY secret nije postavljen"; exit 1; }
+          test -n "$GEMINI_API_KEY" || {
+            echo "GEMINI_API_KEY secret nije postavljen"
+            exit 1
+          }
+
           printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties
           printf 'GEMINI_API_KEY=%s\n' "$GEMINI_API_KEY" >> local.properties
 
