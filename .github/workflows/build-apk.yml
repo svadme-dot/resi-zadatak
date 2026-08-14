@@ -33,42 +33,99 @@ jobs:
         run: |
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Raspakuj i popravi Android projekat
+      - name: Raspakuj projekat
         run: |
           rm -rf work
           mkdir work
           unzip -q ResiZadatak-project.zip -d work
 
           test -f work/ResiZadatak/settings.gradle.kts
+          test -f work/ResiZadatak/build.gradle.kts
           test -f work/ResiZadatak/app/build.gradle.kts
 
+      - name: Popravi Android build konfiguraciju
+        run: |
           python3 <<'PY'
           from pathlib import Path
 
-          p = Path("work/ResiZadatak/app/build.gradle.kts")
-          text = p.read_text(encoding="utf-8")
+          root = Path("work/ResiZadatak")
+          top = root / "build.gradle.kts"
+          app = root / "app/build.gradle.kts"
 
-          # GitHub runner trenutno ima stabilni Android API 36.
-          text = text.replace("compileSdk = 37", "compileSdk = 36")
-          text = text.replace("targetSdk = 37", "targetSdk = 36")
+          # ---------------------------------------------------------
+          # TOP-LEVEL build.gradle.kts
+          # Kotlin ostaje 2.4.10.
+          # KAPT izbacujemo i ubacujemo KSP 2.3.10.
+          # ---------------------------------------------------------
 
-          # Kotlin 2.4 / AGP 9 prijavljuje legacy DSL kao deprecation error.
+          t = top.read_text(encoding="utf-8")
+
+          t = t.replace(
+              'id("org.jetbrains.kotlin.kapt") version "2.4.10" apply false',
+              'id("com.google.devtools.ksp") version "2.3.10" apply false'
+          )
+
+          top.write_text(t, encoding="utf-8")
+
+          # ---------------------------------------------------------
+          # APP build.gradle.kts
+          # ---------------------------------------------------------
+
+          a = app.read_text(encoding="utf-8")
+
+          # Runner trenutno koristi stabilni Android API 36.
+          a = a.replace("compileSdk = 37", "compileSdk = 36")
+          a = a.replace("targetSdk = 37", "targetSdk = 36")
+
+          # KAPT -> KSP
+          a = a.replace(
+              'id("org.jetbrains.kotlin.kapt")',
+              'id("com.google.devtools.ksp")'
+          )
+
+          a = a.replace(
+              'kapt("androidx.room:room-compiler:2.8.4")',
+              'ksp("androidx.room:room-compiler:2.8.4")'
+          )
+
+          # Ovo važi samo za kapt i više nam ne treba.
+          a = a.replace(
+              'kapt { correctErrorTypes = true }',
+              ''
+          )
+
+          # AGP 9 + stari DSL je deprecation-error u ovom projektu.
           suppression = '@file:Suppress("DEPRECATION", "DEPRECATION_ERROR")'
 
-          if suppression not in text:
-              text = suppression + "\n\n" + text
+          if suppression not in a:
+              a = suppression + "\n\n" + a
 
-          p.write_text(text, encoding="utf-8")
+          app.write_text(a, encoding="utf-8")
 
-          print("=== build.gradle.kts patched ===")
-          for i, line in enumerate(text.splitlines(), 1):
-              if (
-                  "Suppress" in line
-                  or "compileSdk" in line
-                  or "targetSdk" in line
-                  or "kotlinOptions" in line
-              ):
-                  print(f"{i}: {line}")
+          # ---------------------------------------------------------
+          # Provera da patch stvarno jeste primenjen.
+          # ---------------------------------------------------------
+
+          top_text = top.read_text(encoding="utf-8")
+          app_text = app.read_text(encoding="utf-8")
+
+          assert 'com.google.devtools.ksp' in top_text
+          assert 'org.jetbrains.kotlin.kapt") version' not in top_text
+
+          assert 'id("com.google.devtools.ksp")' in app_text
+          assert 'ksp("androidx.room:room-compiler:2.8.4")' in app_text
+          assert 'kapt("androidx.room:room-compiler:2.8.4")' not in app_text
+
+          assert "compileSdk = 36" in app_text
+          assert "targetSdk = 36" in app_text
+
+          print("======================================")
+          print("BUILD PATCH USPESNO PRIMENJEN")
+          print("Kotlin: 2.4.10")
+          print("KSP:    2.3.10")
+          print("Room:   2.8.4 preko KSP")
+          print("SDK:    36")
+          print("======================================")
           PY
 
       - name: Dodaj Gemini API key
@@ -86,21 +143,35 @@ jobs:
 
       - name: Build APK
         working-directory: work/ResiZadatak
+        shell: bash
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon :app:assembleDebug --stacktrace
+
+          set -o pipefail
+
+          ./gradlew \
+            --no-daemon \
+            :app:assembleDebug \
+            --stacktrace \
+            2>&1 | tee build.log
 
       - name: Proveri APK
         working-directory: work/ResiZadatak
         run: |
           test -f app/build/outputs/apk/debug/app-debug.apk
+
+          echo "======================================"
+          echo "APK USPESNO NAPRAVLJEN"
+          echo "======================================"
+
           ls -lh app/build/outputs/apk/debug/app-debug.apk
 
       - name: Preimenuj APK
         working-directory: work/ResiZadatak
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk \
-             app/build/outputs/apk/debug/ResiZadatak-debug.apk
+          cp \
+            app/build/outputs/apk/debug/app-debug.apk \
+            app/build/outputs/apk/debug/ResiZadatak-debug.apk
 
       - name: Sacuvaj APK
         uses: actions/upload-artifact@v7
@@ -108,3 +179,11 @@ jobs:
           name: ResiZadatak-APK
           path: work/ResiZadatak/app/build/outputs/apk/debug/ResiZadatak-debug.apk
           if-no-files-found: error
+
+      - name: Sacuvaj build log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ResiZadatak-build-log
+          path: work/ResiZadatak/build.log
+          if-no-files-found: ignore
