@@ -38,7 +38,6 @@ jobs:
           rm -rf work
           mkdir work
           unzip -q ResiZadatak-project.zip -d work
-
           test -f work/ResiZadatak/settings.gradle.kts
           test -f work/ResiZadatak/build.gradle.kts
           test -f work/ResiZadatak/app/build.gradle.kts
@@ -49,7 +48,6 @@ jobs:
           from pathlib import Path
 
           root = Path("work/ResiZadatak")
-
           top = root / "build.gradle.kts"
           app = root / "app/build.gradle.kts"
           gemini = root / "app/src/main/java/com/resizadatak/app/data/remote/GeminiAiService.kt"
@@ -57,69 +55,31 @@ jobs:
           screen = root / "app/src/main/java/com/resizadatak/app/ui/chat/ChatScreen.kt"
           styles = root / "app/src/main/res/values/styles.xml"
 
-          # =====================================================
           # KAPT -> KSP
-          # =====================================================
-
           t = top.read_text(encoding="utf-8")
-
           t = t.replace(
               'id("org.jetbrains.kotlin.kapt") version "2.4.10" apply false',
               'id("com.google.devtools.ksp") version "2.3.10" apply false'
           )
-
           top.write_text(t, encoding="utf-8")
 
-          # =====================================================
-          # APP BUILD
-          # =====================================================
-
+          # Ranije build popravke.
           a = app.read_text(encoding="utf-8")
-
           a = a.replace("compileSdk = 37", "compileSdk = 36")
           a = a.replace("targetSdk = 37", "targetSdk = 36")
-
-          a = a.replace(
-              'id("org.jetbrains.kotlin.kapt")',
-              'id("com.google.devtools.ksp")'
-          )
-
-          a = a.replace(
-              'kapt("androidx.room:room-compiler:2.8.4")',
-              'ksp("androidx.room:room-compiler:2.8.4")'
-          )
-
-          a = a.replace(
-              'kapt { correctErrorTypes = true }',
-              ''
-          )
-
-          a = a.replace(
-              'implementation("androidx.core:core-ktx:1.19.0")',
-              'implementation("androidx.core:core-ktx:1.17.0")'
-          )
-
-          a = a.replace(
-              'implementation("androidx.activity:activity-compose:1.13.0")',
-              'implementation("androidx.activity:activity-compose:1.12.4")'
-          )
-
-          a = a.replace(
-              'implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")',
-              'implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")'
-          )
-
-          a = a.replace(
-              'implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")',
-              'implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")'
-          )
+          a = a.replace('id("org.jetbrains.kotlin.kapt")', 'id("com.google.devtools.ksp")')
+          a = a.replace('kapt("androidx.room:room-compiler:2.8.4")', 'ksp("androidx.room:room-compiler:2.8.4")')
+          a = a.replace('kapt { correctErrorTypes = true }', '')
+          a = a.replace('implementation("androidx.core:core-ktx:1.19.0")', 'implementation("androidx.core:core-ktx:1.17.0")')
+          a = a.replace('implementation("androidx.activity:activity-compose:1.13.0")', 'implementation("androidx.activity:activity-compose:1.12.4")')
+          a = a.replace('implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")', 'implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")')
+          a = a.replace('implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")', 'implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")')
 
           suppression = '@file:Suppress("DEPRECATION", "DEPRECATION_ERROR")'
-
           if suppression not in a:
               a = suppression + "\n\n" + a
 
-          resolution = '''
+          resolution = """
           configurations.configureEach {
               resolutionStrategy.eachDependency {
                   when (requested.group) {
@@ -134,202 +94,113 @@ jobs:
               }
           }
 
-          '''
-
+          """
           if "resolutionStrategy.eachDependency" not in a:
-              a = a.replace(
-                  "dependencies {",
-                  resolution + "dependencies {",
-                  1
-              )
-
+              a = a.replace("dependencies {", resolution + "dependencies {", 1)
           app.write_text(a, encoding="utf-8")
 
-          # =====================================================
-          # GEMINI KOTLIN FIX
-          # =====================================================
-
+          # Gemini syntax fix.
           g = gemini.read_text(encoding="utf-8")
-
-          g = g.replace(
-              "throw@withContext AiServiceException",
-              "throw AiServiceException"
-          )
-
+          g = g.replace("throw@withContext AiServiceException", "throw AiServiceException")
           gemini.write_text(g, encoding="utf-8")
 
-          # =====================================================
-          # THEME FIX
-          # =====================================================
-
+          # Theme fix.
           s = styles.read_text(encoding="utf-8")
-
-          s = s.replace(
-              "android:style/Theme.DeviceDefault.DayNight.NoActionBar",
-              "android:style/Theme.Material.NoActionBar"
-          )
-
+          s = s.replace("android:style/Theme.DeviceDefault.DayNight.NoActionBar", "android:style/Theme.Material.NoActionBar")
           styles.write_text(s, encoding="utf-8")
 
-          # =====================================================
-          # DIJAGNOSTIKA:
-          # Sacuvaj pravi exception + velicinu slike u Room
-          # =====================================================
-
+          # ChatRepository dijagnostika: OVO JE TACAN BLOK IZ ORIGINALNOG ZIP-a.
           r = repo.read_text(encoding="utf-8")
+          old_repo = """            } catch (e: AiServiceException) {
+                          dao.updateMessageStatus(userMessageId, MessageStatus.ERROR, e.kind.name)
+                      } catch (_: Throwable) {
+                          dao.updateMessageStatus(userMessageId, MessageStatus.ERROR, AiErrorKind.UNKNOWN.name)
+                      }"""
+          new_repo = """            } catch (e: AiServiceException) {
+                          val detail = e.cause?.message ?: e.message ?: "Nema dodatne poruke."
+                          val imageInfo = turns.mapNotNull { turn ->
+                              turn.imagePath?.let { path ->
+                                  val file = java.io.File(path)
+                                  val kb = file.length() / 1024.0
+                                  val mime = turn.imageMimeType ?: "nepoznat MIME"
+                                  "$mime, %.1f KB".format(kb)
+                              }
+                          }.joinToString("; ")
 
-          old = '''            } catch (e: AiServiceException) {
-              dao.updateMessageStatus(userMessageId, MessageStatus.ERROR, e.kind.name)
-          } catch (_: Throwable) {
-              dao.updateMessageStatus(userMessageId, MessageStatus.ERROR, AiErrorKind.UNKNOWN.name)
-          }'''
+                          val diagnostic = buildString {
+                              append(e.kind.name)
+                              append("|||")
+                              append(detail.take(1800))
+                              if (imageInfo.isNotBlank()) {
+                                  append("\\nSlika: ")
+                                  append(imageInfo)
+                              }
+                          }
+                          dao.updateMessageStatus(userMessageId, MessageStatus.ERROR, diagnostic.take(2400))
+                      } catch (e: Throwable) {
+                          val imageInfo = turns.mapNotNull { turn ->
+                              turn.imagePath?.let { path ->
+                                  val file = java.io.File(path)
+                                  val kb = file.length() / 1024.0
+                                  val mime = turn.imageMimeType ?: "nepoznat MIME"
+                                  "$mime, %.1f KB".format(kb)
+                              }
+                          }.joinToString("; ")
 
-          # Razlicito uvlačenje u originalu - koristi direktniji replace.
-          old2 = '''            } catch (e: AiServiceException) {
-                  dao.updateMessageStatus(userMessageId, MessageStatus.ERROR, e.kind.name)
-              } catch (_: Throwable) {
-                  dao.updateMessageStatus(userMessageId, MessageStatus.ERROR, AiErrorKind.UNKNOWN.name)
-              }'''
-
-          new = '''            } catch (e: AiServiceException) {
-                  val causeText = generateSequence(e.cause) { it.cause }
-                      .joinToString(" <- ") { cause ->
-                          val msg = cause.message?.trim().orEmpty()
-                          if (msg.isBlank()) cause.javaClass.simpleName
-                          else "${cause.javaClass.simpleName}: $msg"
-                      }
-                      .take(1800)
-
-                  val imageText = turns.mapNotNull { turn ->
-                      turn.imagePath?.let { path ->
-                          val file = java.io.File(path)
-                          val kb = file.length() / 1024.0
-                          val mime = turn.imageMimeType ?: "nepoznat MIME"
-                          "$mime, %.1f KB".format(kb)
-                      }
-                  }.joinToString("; ")
-
-                  val diagnostic = buildString {
-                      append(e.kind.name)
-                      append("|||")
-                      if (causeText.isNotBlank()) append(causeText)
-                      else append("Nema dodatne exception poruke.")
-                      if (imageText.isNotBlank()) {
-                          append("\\nSlika: ")
-                          append(imageText)
-                      }
-                  }
-
-                  dao.updateMessageStatus(
-                      userMessageId,
-                      MessageStatus.ERROR,
-                      diagnostic.take(2500)
-                  )
-              } catch (e: Throwable) {
-                  val imageText = turns.mapNotNull { turn ->
-                      turn.imagePath?.let { path ->
-                          val file = java.io.File(path)
-                          val kb = file.length() / 1024.0
-                          val mime = turn.imageMimeType ?: "nepoznat MIME"
-                          "$mime, %.1f KB".format(kb)
-                      }
-                  }.joinToString("; ")
-
-                  val diagnostic = buildString {
-                      append(AiErrorKind.UNKNOWN.name)
-                      append("|||")
-                      append(e.javaClass.simpleName)
-                      append(": ")
-                      append(e.message ?: "Nema poruke.")
-                      if (imageText.isNotBlank()) {
-                          append("\\nSlika: ")
-                          append(imageText)
-                      }
-                  }
-
-                  dao.updateMessageStatus(
-                      userMessageId,
-                      MessageStatus.ERROR,
-                      diagnostic.take(2500)
-                  )
-              }'''
-
-          if old2 in r:
-              r = r.replace(old2, new)
-          else:
-              r = r.replace(
-                  '''            } catch (e: AiServiceException) {
-                  dao.updateMessageStatus(userMessageId, MessageStatus.ERROR, e.kind.name)
-              } catch (_: Throwable) {
-                  dao.updateMessageStatus(userMessageId, MessageStatus.ERROR, AiErrorKind.UNKNOWN.name)
-              }''',
-                  new
-              )
-
-          if 'append("|||")' not in r:
-              raise RuntimeError("Nisam uspeo da ubacim ChatRepository dijagnostiku.")
-
+                          val diagnostic = buildString {
+                              append(AiErrorKind.UNKNOWN.name)
+                              append("|||")
+                              append(e.javaClass.simpleName)
+                              append(": ")
+                              append((e.message ?: "Nema poruke.").take(1800))
+                              if (imageInfo.isNotBlank()) {
+                                  append("\\nSlika: ")
+                                  append(imageInfo)
+                              }
+                          }
+                          dao.updateMessageStatus(userMessageId, MessageStatus.ERROR, diagnostic.take(2400))
+                      }"""
+          if old_repo not in r:
+              raise RuntimeError("ChatRepository catch blok nije pronadjen")
+          r = r.replace(old_repo, new_repo, 1)
           repo.write_text(r, encoding="utf-8")
 
-          # =====================================================
-          # UI: prikazi stvarnu dijagnostiku na ekranu
-          # =====================================================
-
+          # ChatScreen: prikazi detalj.
           c = screen.read_text(encoding="utf-8")
-
-          old_error = '''private fun errorText(kind: String?): String = when (kind) {
+          old_error = """private fun errorText(kind: String?): String = when (kind) {
               AiErrorKind.NO_INTERNET.name -> "Nema internet veze. Proveri vezu i pokušaj ponovo."
               AiErrorKind.RATE_LIMIT.name -> "Trenutno je dostignut limit za AI servis. Pokušaj ponovo malo kasnije."
               AiErrorKind.INVALID_KEY.name -> "AI servis nije pravilno podešen. Proveri API ključ u aplikaciji."
               else -> "Nešto nije uspelo. Pokušaj ponovo."
-          }'''
-
-          new_error = '''private fun errorText(raw: String?): String {
+          }"""
+          new_error = """private fun errorText(raw: String?): String {
               val parts = raw.orEmpty().split("|||", limit = 2)
               val kind = parts.firstOrNull().orEmpty()
               val detail = parts.getOrNull(1)?.trim().orEmpty()
 
               val normal = when (kind) {
-                  AiErrorKind.NO_INTERNET.name ->
-                      "Problem sa vezom ili mrežnim zahtevom."
-                  AiErrorKind.RATE_LIMIT.name ->
-                      "Dostignut je limit za AI servis."
-                  AiErrorKind.INVALID_KEY.name ->
-                      "Problem sa API ključem ili pristupom modelu."
-                  AiErrorKind.TEMPORARY.name ->
-                      "Privremena greška Gemini servisa."
-                  else ->
-                      "Gemini zahtev nije uspeo."
+                  AiErrorKind.NO_INTERNET.name -> "Problem sa internet vezom ili mrežnim zahtevom."
+                  AiErrorKind.RATE_LIMIT.name -> "Dostignut je limit za AI servis."
+                  AiErrorKind.INVALID_KEY.name -> "Problem sa API ključem ili pristupom modelu."
+                  AiErrorKind.TEMPORARY.name -> "Privremena greška Gemini servisa."
+                  else -> "Gemini zahtev nije uspeo."
               }
 
-              return if (detail.isBlank()) {
-                  normal
-              } else {
-                  "$normal\\n\\nDIJAGNOSTIKA:\\n${detail.take(1800)}"
-              }
-          }'''
-
+              return if (detail.isBlank()) normal
+              else "$normal\\n\\nDIJAGNOSTIKA:\\n${detail.take(1900)}"
+          }"""
           if old_error not in c:
-              raise RuntimeError("Nisam našao errorText funkciju u ChatScreen.kt.")
-
-          c = c.replace(old_error, new_error)
+              raise RuntimeError("ChatScreen errorText blok nije pronadjen")
+          c = c.replace(old_error, new_error, 1)
           screen.write_text(c, encoding="utf-8")
 
-          # =====================================================
-          # HARD CHECK
-          # =====================================================
-
-          assert "compileSdk = 36" in app.read_text(encoding="utf-8")
           assert 'id("com.google.devtools.ksp")' in app.read_text(encoding="utf-8")
+          assert 'ksp("androidx.room:room-compiler:2.8.4")' in app.read_text(encoding="utf-8")
+          assert "compileSdk = 36" in app.read_text(encoding="utf-8")
           assert "Theme.Material.NoActionBar" in styles.read_text(encoding="utf-8")
-          assert "DIJAGNOSTIKA:" in screen.read_text(encoding="utf-8")
           assert 'append("|||")' in repo.read_text(encoding="utf-8")
-
-          print("======================================")
-          print("DIJAGNOSTICKA VERZIJA SPREMNA")
-          print("HTTP/exception detalji: ON")
-          print("Velicina slike: ON")
-          print("======================================")
+          assert "DIJAGNOSTIKA:" in screen.read_text(encoding="utf-8")
+          print("DIJAGNOSTICKI PATCH USPESNO PRIMENJEN")
           PY
 
       - name: Dodaj Gemini API key
@@ -341,7 +212,6 @@ jobs:
             echo "GEMINI_API_KEY secret nije postavljen"
             exit 1
           }
-
           printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties
           printf 'GEMINI_API_KEY=%s\n' "$GEMINI_API_KEY" >> local.properties
 
@@ -351,12 +221,7 @@ jobs:
         run: |
           chmod +x gradlew
           set -o pipefail
-
-          ./gradlew \
-            --no-daemon \
-            :app:assembleDebug \
-            --stacktrace \
-            2>&1 | tee build.log
+          ./gradlew --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee build.log
 
       - name: Proveri APK
         working-directory: work/ResiZadatak
@@ -367,9 +232,8 @@ jobs:
       - name: Preimenuj APK
         working-directory: work/ResiZadatak
         run: |
-          cp \
-            app/build/outputs/apk/debug/app-debug.apk \
-            app/build/outputs/apk/debug/ResiZadatak-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk \
+             app/build/outputs/apk/debug/ResiZadatak-debug.apk
 
       - name: Sacuvaj APK
         uses: actions/upload-artifact@v7
