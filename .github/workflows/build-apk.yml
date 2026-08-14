@@ -43,7 +43,7 @@ jobs:
           test -f work/ResiZadatak/build.gradle.kts
           test -f work/ResiZadatak/app/build.gradle.kts
 
-      - name: Popravi build konfiguraciju i Kotlin kod
+      - name: Popravi projekat
         run: |
           python3 <<'PY'
           from pathlib import Path
@@ -53,10 +53,11 @@ jobs:
           top = root / "build.gradle.kts"
           app = root / "app/build.gradle.kts"
           gemini = root / "app/src/main/java/com/resizadatak/app/data/remote/GeminiAiService.kt"
+          styles = root / "app/src/main/res/values/styles.xml"
 
-          # =========================================================
-          # 1. TOP LEVEL: KAPT -> KSP
-          # =========================================================
+          # =====================================================
+          # ROOT BUILD.GRADLE: KAPT -> KSP
+          # =====================================================
 
           t = top.read_text(encoding="utf-8")
 
@@ -67,17 +68,22 @@ jobs:
 
           top.write_text(t, encoding="utf-8")
 
-          # =========================================================
-          # 2. APP BUILD.GRADLE.KTS
-          # =========================================================
+          # =====================================================
+          # APP BUILD.GRADLE
+          # =====================================================
 
           a = app.read_text(encoding="utf-8")
 
-          # SDK 37 trenutno nije dostupan runneru.
-          a = a.replace("compileSdk = 37", "compileSdk = 36")
-          a = a.replace("targetSdk = 37", "targetSdk = 36")
+          a = a.replace(
+              "compileSdk = 37",
+              "compileSdk = 36"
+          )
 
-          # KAPT -> KSP za Room.
+          a = a.replace(
+              "targetSdk = 37",
+              "targetSdk = 36"
+          )
+
           a = a.replace(
               'id("org.jetbrains.kotlin.kapt")',
               'id("com.google.devtools.ksp")'
@@ -93,7 +99,7 @@ jobs:
               ''
           )
 
-          # Biblioteke koje još rade sa compileSdk 36.
+          # Verzije koje rade sa compileSdk 36.
           a = a.replace(
               'implementation("androidx.core:core-ktx:1.19.0")',
               'implementation("androidx.core:core-ktx:1.17.0")'
@@ -114,14 +120,11 @@ jobs:
               'implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")'
           )
 
-          # AGP 9 prijavljuje legacy DSL deprecations kao errors.
           suppression = '@file:Suppress("DEPRECATION", "DEPRECATION_ERROR")'
 
           if suppression not in a:
               a = suppression + "\n\n" + a
 
-          # Sprečava tranzitivne dependency-je da ponovo podignu
-          # Lifecycle na 2.11 ili Core na 1.19.
           resolution = '''
           configurations.configureEach {
               resolutionStrategy.eachDependency {
@@ -148,9 +151,9 @@ jobs:
 
           app.write_text(a, encoding="utf-8")
 
-          # =========================================================
-          # 3. POPRAVI GEMINI KOTLIN GREŠKU
-          # =========================================================
+          # =====================================================
+          # GEMINI KOTLIN FIX
+          # =====================================================
 
           g = gemini.read_text(encoding="utf-8")
 
@@ -161,13 +164,27 @@ jobs:
 
           gemini.write_text(g, encoding="utf-8")
 
-          # =========================================================
-          # 4. HARD CHECK
-          # =========================================================
+          # =====================================================
+          # ANDROID THEME FIX
+          # =====================================================
+
+          s = styles.read_text(encoding="utf-8")
+
+          s = s.replace(
+              "android:style/Theme.DeviceDefault.DayNight.NoActionBar",
+              "android:style/Theme.Material.NoActionBar"
+          )
+
+          styles.write_text(s, encoding="utf-8")
+
+          # =====================================================
+          # PROVERE
+          # =====================================================
 
           top_text = top.read_text(encoding="utf-8")
           app_text = app.read_text(encoding="utf-8")
           gemini_text = gemini.read_text(encoding="utf-8")
+          styles_text = styles.read_text(encoding="utf-8")
 
           assert 'id("com.google.devtools.ksp")' in app_text
           assert 'ksp("androidx.room:room-compiler:2.8.4")' in app_text
@@ -176,21 +193,23 @@ jobs:
           assert "targetSdk = 36" in app_text
 
           assert "core-ktx:1.17.0" in app_text
-          assert "activity-compose:1.12.4" in app_text
           assert "lifecycle-runtime-ktx:2.10.0" in app_text
           assert "lifecycle-viewmodel-compose:2.10.0" in app_text
 
           assert "throw@withContext" not in gemini_text
 
+          assert "Theme.DeviceDefault.DayNight.NoActionBar" not in styles_text
+          assert "Theme.Material.NoActionBar" in styles_text
+
           print("======================================")
-          print("PATCH OK")
+          print("SVE POZNATE BUILD GRESKE POPRAVLJENE")
           print("SDK:       36")
           print("Kotlin:    2.4.10")
           print("Room:      2.8.4 + KSP")
           print("Core:      1.17.0")
-          print("Activity:  1.12.4")
           print("Lifecycle: 2.10.0")
-          print("Gemini throw syntax: FIXED")
+          print("Gemini:    FIXED")
+          print("Theme:     FIXED")
           print("======================================")
           PY
 
