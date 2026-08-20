@@ -1,0 +1,1328 @@
+<!doctype html>
+<html lang="sr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0a0b0f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="OmniVoice">
+<title>OmniVoice Mobile AUTO</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="./icon.svg">
+<style>
+:root{
+  --bg:#090a0e;--surface:#111319;--panel:#151820;--panel2:#1b1f29;--panel3:#202632;
+  --border:#2a303d;--text:#f7f8fa;--muted:#929baa;--subtle:#687182;
+  --accent:#ff9d2e;--accent2:#ffb25c;--good:#55d98a;--bad:#ff6b6b;--blue:#63a7ff;
+  --safe-top:env(safe-area-inset-top,0px);--safe-bottom:env(safe-area-inset-bottom,0px);
+  --radius:18px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;min-height:100%}
+body{padding:calc(10px + var(--safe-top)) 12px calc(84px + var(--safe-bottom))}
+button,input,textarea,select{font:inherit}
+button{border:0;cursor:pointer}
+.app{max-width:720px;margin:0 auto}
+.header{display:flex;align-items:center;gap:12px;padding:8px 2px 14px;position:sticky;top:0;background:linear-gradient(var(--bg) 75%,transparent);z-index:20}
+.logo{width:42px;height:42px;border-radius:13px;background:var(--accent);color:#17100a;font-weight:900;font-size:22px;display:grid;place-items:center;box-shadow:0 10px 30px #0008}
+.brand{min-width:0;flex:1}.brand h1{font-size:19px;line-height:1.05;margin:0}.brand small{display:block;color:var(--muted);font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge{font-size:11px;font-weight:800;padding:7px 9px;border-radius:999px;background:#10251a;color:var(--good);white-space:nowrap}
+.iconbtn{width:40px;height:40px;border-radius:12px;background:var(--panel2);color:var(--text);font-size:18px}
+.card{background:linear-gradient(180deg,#161922,#12151c);border:1px solid var(--border);border-radius:var(--radius);padding:15px;margin-bottom:12px;box-shadow:0 16px 40px #0003}
+.eyebrow{font-size:10px;letter-spacing:.12em;font-weight:900;color:var(--accent);margin-bottom:10px}
+textarea{width:100%;min-height:150px;resize:vertical;background:#0e1016;border:1px solid #222936;border-radius:14px;color:var(--text);padding:14px;font-size:16px;line-height:1.42;outline:none}
+textarea:focus{border-color:#5b3b1c;box-shadow:0 0 0 3px #ff9d2e18}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:13px}
+.control{background:#10131a;border:1px solid #202633;border-radius:13px;padding:10px}
+.control-head{display:flex;justify-content:space-between;color:var(--muted);font-size:10px;font-weight:800;margin-bottom:8px}.control-head b{color:var(--text);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.generate{margin-top:13px;width:100%;padding:14px 16px;border-radius:14px;background:var(--accent);color:#17100a;font-weight:900;font-size:15px;box-shadow:0 10px 24px #ff9d2e24}
+.generate:disabled{opacity:.55}
+.status-top{display:flex;align-items:center;justify-content:space-between;gap:10px}.status-title{font-weight:900;font-size:16px}.timer{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-weight:900;color:var(--accent);font-size:19px}
+.status-detail{font-size:13px;line-height:1.38;color:#d7dbe3;margin-top:8px}
+.gpu{background:#0e1117;border:1px solid #202633;border-radius:13px;padding:11px;margin-top:12px}.gpu small{display:block;color:var(--subtle);font-size:9px;font-weight:900;letter-spacing:.12em}.gpu div{font-size:13px;font-weight:800;margin-top:4px;color:var(--muted)}
+.player-title{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.track-name{font-size:15px;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.track-path{font-size:10px;color:var(--subtle);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.duration{font:12px ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted);white-space:nowrap}
+.seek{width:100%;margin:14px 0 2px}
+.time{font:11px ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted);text-align:right}
+.player-controls{display:grid;grid-template-columns:46px 1fr 54px 54px 46px;gap:7px;margin-top:10px}
+.pbtn{height:44px;border-radius:12px;background:var(--panel3);color:var(--text);font-weight:900}.pbtn.main{background:var(--text);color:#0d0f13}.pbtn:disabled{opacity:.35}
+.library-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:16px 0 8px}.library-head strong{font-size:11px;color:var(--subtle);letter-spacing:.08em}.library-actions{display:flex;gap:6px}.smallbtn{padding:7px 9px;border-radius:9px;background:var(--panel3);color:var(--muted);font-size:10px;font-weight:800}
+.filelist{border:1px solid #222936;border-radius:13px;overflow:hidden;max-height:235px;overflow-y:auto;background:#0e1117}
+.file{display:grid;grid-template-columns:1fr 58px;gap:8px;padding:11px 12px;border-bottom:1px solid #1d2330;align-items:center}.file:last-child{border-bottom:0}.file.selected{background:#ff9d2e;color:#17100a}.file.selected .flen{color:#17100a}.fname{font-size:13px;font-weight:750;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.flen{text-align:right;font:11px ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted)}
+.empty{padding:20px;text-align:center;color:var(--subtle);font-size:12px}
+.diag{white-space:pre-wrap;overflow-wrap:anywhere;background:#0d1016;border-radius:13px;border:1px solid #202633;padding:12px;font:11px/1.48 ui-monospace,SFMono-Regular,Consolas,monospace;color:#d7dce5;max-height:390px;overflow:auto}
+.row{display:flex;gap:8px;align-items:center}.row>*{flex:1}
+.setting{margin-bottom:12px}.setting label{display:block;font-size:10px;color:var(--muted);font-weight:800;margin-bottom:6px}.setting input{width:100%;background:#0e1016;border:1px solid #252c39;color:var(--text);border-radius:12px;padding:12px;outline:none}
+.actions{display:flex;gap:8px;flex-wrap:wrap}.action{padding:11px 12px;border-radius:11px;background:var(--panel3);color:var(--text);font-weight:800;font-size:12px}.action.primary{background:var(--accent);color:#17100a}.action.danger{background:#2a1416;color:var(--bad)}
+.modal{position:fixed;inset:0;background:#000b;backdrop-filter:blur(12px);z-index:100;display:none;align-items:flex-end;justify-content:center}.modal.show{display:flex}.sheet{width:100%;max-width:720px;background:#12151c;border:1px solid var(--border);border-radius:24px 24px 0 0;padding:18px 16px calc(22px + var(--safe-bottom));max-height:88vh;overflow:auto}
+.sheet h2{margin:0 0 4px;font-size:20px}.sheet p{margin:0 0 16px;color:var(--muted);font-size:12px;line-height:1.45}
+.notice{padding:10px;border-radius:12px;background:#171b24;color:var(--muted);font-size:11px;line-height:1.4;margin-top:10px}
+.toast{position:fixed;left:50%;bottom:calc(78px + var(--safe-bottom));transform:translateX(-50%) translateY(20px);opacity:0;pointer-events:none;background:#f7f8fa;color:#11151b;padding:10px 14px;border-radius:999px;font-size:12px;font-weight:850;z-index:200;transition:.2s;max-width:90%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.toast.show{opacity:1;transform:translateX(-50%)}
+.bottomnav{position:fixed;z-index:50;left:0;right:0;bottom:0;padding:8px 12px calc(8px + var(--safe-bottom));background:#090a0ef2;border-top:1px solid #202632;backdrop-filter:blur(18px)}.navinner{max-width:720px;margin:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.navbtn{background:transparent;color:var(--muted);border-radius:12px;padding:10px;font-size:11px;font-weight:850}.navbtn.active{background:#1b1f29;color:var(--accent)}
+.page{display:none}.page.active{display:block}
+details summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:800}
+.apiwarn{color:#ffca7a}
+@media(min-width:620px){body{padding-left:20px;padding-right:20px}.sheet{border-radius:24px;margin-bottom:20px}.modal{align-items:center}.grid2{gap:14px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="header">
+    <div class="logo">O</div>
+    <div class="brand">
+      <h1>OmniVoice Mobile AUTO</h1>
+      <small id="endpointLabel">AUTO • LOCAL ≤90 / MODAL • WEB AUDIO &gt;90</small>
+    </div>
+    <span class="badge" id="headerBadge">● READY</span>
+    <button class="iconbtn" id="settingsBtn" aria-label="Podešavanja">⚙</button>
+  </header>
+
+  <main id="pageSynth" class="page active">
+    <section class="card">
+      <div class="eyebrow">SYNTHESIS • SR</div>
+      <textarea id="textInput">Ovo je test generisanja srpskog glasa preko RunPod serverless sistema.</textarea>
+      <div class="grid2">
+        <div class="control">
+          <div class="control-head"><span>SPEED</span><b id="speedValue">1.00×</b></div>
+          <input id="speed" type="range" min="0.70" max="1.20" step="0.01" value="1.00">
+        </div>
+        <div class="control">
+          <div class="control-head"><span>STEPS</span><b id="stepsValue">32</b></div>
+          <input id="steps" type="range" min="1" max="64" step="1" value="32">
+        </div>
+      </div>
+      <button class="generate" id="generateBtn">GENERISI →</button>
+    </section>
+
+    <section class="card">
+      <div class="status-top">
+        <div class="status-title" id="statusTitle">SPREMNO</div>
+        <div class="timer" id="timer">0.000 s</div>
+      </div>
+      <div class="status-detail" id="statusDetail">Čeka zahtev.</div>
+      <div class="gpu">
+        <small>GPU / WORKER</small>
+        <div id="gpuLine">—</div>
+      </div>
+    </section>
+  </main>
+
+  <main id="pagePlayer" class="page">
+    <section class="card">
+      <div class="eyebrow">PLAYER</div>
+      <div class="player-title">
+        <div style="min-width:0;flex:1">
+          <div class="track-name" id="trackName">Još nema generisanog WAV-a</div>
+          <div class="track-path" id="trackPath">Browser library</div>
+        </div>
+        <div class="duration" id="trackDuration">00:00</div>
+      </div>
+
+      <input class="seek" id="seek" type="range" min="0" max="1" step="0.01" value="0" disabled>
+      <div class="time" id="playerTime">00:00 / 00:00</div>
+
+      <div class="player-controls">
+        <button class="pbtn" id="toStart" disabled>|◀</button>
+        <button class="pbtn main" id="playBtn" disabled>▶ PLAY</button>
+        <button class="pbtn" id="pauseBtn" disabled>Ⅱ</button>
+        <button class="pbtn" id="stopBtn" disabled>■</button>
+        <button class="pbtn" id="toEnd" disabled>▶|</button>
+      </div>
+
+      <div class="library-head">
+        <strong>OUTPUT LIBRARY <span id="libCount">0 WAV</span></strong>
+        <div class="library-actions">
+          <button class="smallbtn" id="saveWavBtn">SAVE WAV</button>
+          <button class="smallbtn" id="folderBtn">FOLDER</button>
+          <button class="smallbtn" id="importBtn">IMPORT</button>
+          <button class="smallbtn" id="refreshBtn">↻</button>
+        </div>
+      </div>
+      <div class="filelist" id="fileList"><div class="empty">Nema WAV fajlova.</div></div>
+      <input id="fileImport" type="file" accept="audio/wav,audio/x-wav,.wav" multiple hidden>
+    </section>
+  </main>
+
+  <main id="pageDiag" class="page">
+    <section class="card">
+      <div class="eyebrow">DIAGNOSTICS</div>
+      <div class="diag" id="diag">Još nema završenog zahteva.</div>
+    </section>
+  </main>
+</div>
+
+<nav class="bottomnav">
+  <div class="navinner">
+    <button class="navbtn active" data-page="Synth">SYNTHESIS</button>
+    <button class="navbtn" data-page="Player">PLAYER</button>
+    <button class="navbtn" data-page="Diag">DIAGNOSTICS</button>
+  </div>
+</nav>
+
+<div class="modal" id="settingsModal">
+  <div class="sheet">
+    <h2>Podešavanja</h2>
+    <p>Do 90 slova/brojeva ide na tvoj UM790 Pro preko Tailscale-a. Preko 90 ide direktno na Modal. Ako LOCAL nije dostupan, zahtev automatski pada na Modal.</p>
+
+    <div class="setting">
+      <label>LOCAL TTS URL • TAILSCALE</label>
+      <input id="localTtsInput" autocomplete="off" placeholder="https://ime-pc-a.xxxxx.ts.net">
+    </div>
+
+    <div class="setting">
+      <label>MODAL ENDPOINT URL</label>
+      <input id="endpointInput" autocomplete="off" value="https://vasilije-demonjic--omnivoice-sr-omnivoiceservice-generate.modal.run">
+    </div>
+
+    <div class="actions">
+      <button class="action primary" id="saveSettings">SAČUVAJ</button>
+      <button class="action" id="testLocal">TEST LOCAL</button>
+      <button class="action" id="testApi">PROVERI MODAL URL</button>
+      <button class="action" id="pickFolder">POVEŽI OUTPUT FOLDER</button>
+      <button class="action" id="closeSettings">ZATVORI</button>
+    </div>
+
+    <div class="notice" id="storageNotice">
+      Za LOCAL režim otvori ovu aplikaciju preko Tailscale HTTPS adrese računara (/app), ne kao fajl iz Downloads. Tada LOCAL pozivi idu same-origin i Android Chrome ih ne blokira. Aplikacija se kešira za offline pokretanje; ako je PC nedostupan, kratki zahtev može pasti na Modal.
+    </div>
+
+    <div class="notice" id="corsNotice">
+      Routing: broje se samo A-Z, a-z, ŠĆČŽĐ, šćčžđ i 0-9. 0–90 → LOCAL. 91+ → MODAL. Ako LOCAL health check ne prođe ili lokalno generisanje vrati grešku, aplikacija automatski pokušava Modal.
+    </div>
+
+    <details style="margin-top:14px">
+      <summary>Napredna podešavanja</summary>
+      <div class="setting" style="margin-top:12px">
+        <label>MODAL REQUEST TIMEOUT (s)</label>
+        <input id="requestTimeout" type="number" min="30" max="600" value="300">
+      </div>
+      <div class="setting">
+        <label>LOCAL HEALTH TIMEOUT (s)</label>
+        <input id="localHealthTimeout" type="number" min="2" max="20" value="5">
+      </div>
+      <div class="setting">
+        <label>LOCAL GENERATION TIMEOUT (s)</label>
+        <input id="localGenerationTimeout" type="number" min="60" max="1200" value="900">
+      </div>
+    </details>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script>
+"use strict";
+const PLAYER_BUILD="V6-GITHUB-AUTO-ROUTER-WEBAUDIO";
+
+const DEFAULT_MODAL_ENDPOINT = "https://vasilije-demonjic--omnivoice-sr-omnivoiceservice-generate.modal.run";
+const DEFAULT_LOCAL_ENDPOINT = "https://desktop-m04u452.tail03c315.ts.net";
+const LOCAL_CHAR_LIMIT = 90;
+const DEFAULT_MODAL_TIMEOUT_SEC = 300;
+const DEFAULT_LOCAL_HEALTH_TIMEOUT_SEC = 5;
+const DEFAULT_LOCAL_GENERATION_TIMEOUT_SEC = 900;
+
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+
+const state = {
+  modalEndpoint: localStorage.getItem("ov_modal_endpoint") || DEFAULT_MODAL_ENDPOINT,
+  localTtsUrl: localStorage.getItem("ov_local_tts_url") || DEFAULT_LOCAL_ENDPOINT,
+  modalTimeoutSec: +(localStorage.getItem("ov_modal_timeout") || DEFAULT_MODAL_TIMEOUT_SEC),
+  localHealthTimeoutSec: +(localStorage.getItem("ov_local_health_timeout") || DEFAULT_LOCAL_HEALTH_TIMEOUT_SEC),
+  localGenerationTimeoutSec: +(localStorage.getItem("ov_local_generation_timeout") || DEFAULT_LOCAL_GENERATION_TIMEOUT_SEC),
+  busy:false,
+  requestStarted:0,
+  requestSeq:0,
+  selectedId:null,
+  library:[],
+  folderHandle:null,
+  folderPermissionGranted:false,
+  lastResult:null
+};
+
+const el = {
+  endpointLabel:$("#endpointLabel"), badge:$("#headerBadge"),
+  settingsBtn:$("#settingsBtn"), modal:$("#settingsModal"),
+  localTtsInput:$("#localTtsInput"), endpointInput:$("#endpointInput"),
+  requestTimeout:$("#requestTimeout"), localHealthTimeout:$("#localHealthTimeout"), localGenerationTimeout:$("#localGenerationTimeout"),
+  saveSettings:$("#saveSettings"), testLocal:$("#testLocal"), testApi:$("#testApi"), pickFolder:$("#pickFolder"), closeSettings:$("#closeSettings"),
+  text:$("#textInput"), speed:$("#speed"), speedValue:$("#speedValue"), steps:$("#steps"), stepsValue:$("#stepsValue"),
+  generate:$("#generateBtn"), statusTitle:$("#statusTitle"), statusDetail:$("#statusDetail"), timer:$("#timer"), gpu:$("#gpuLine"),
+  seek:$("#seek"), playerTime:$("#playerTime"), trackName:$("#trackName"), trackPath:$("#trackPath"), trackDuration:$("#trackDuration"),
+  play:$("#playBtn"), pause:$("#pauseBtn"), stop:$("#stopBtn"), toStart:$("#toStart"), toEnd:$("#toEnd"),
+  fileList:$("#fileList"), libCount:$("#libCount"), refresh:$("#refreshBtn"), folder:$("#folderBtn"), saveWav:$("#saveWavBtn"), importBtn:$("#importBtn"), fileImport:$("#fileImport"),
+  diag:$("#diag"), toast:$("#toast")
+};
+
+function fmtClock(sec){
+  sec=Math.max(0,Math.round(Number(sec)||0));
+  return `${String(Math.floor(sec/60)).padStart(2,"0")}:${String(sec%60).padStart(2,"0")}`;
+}
+function fmtMs(ms){
+  return Number.isFinite(ms) ? `${(ms/1000).toFixed(3)} s   (${ms.toLocaleString(undefined,{maximumFractionDigits:1})} ms)` : "—";
+}
+function toast(msg){
+  el.toast.textContent=msg; el.toast.classList.add("show");
+  clearTimeout(toast._t); toast._t=setTimeout(()=>el.toast.classList.remove("show"),2200);
+}
+function setStatus(title,detail,color=""){
+  el.statusTitle.textContent=title;
+  el.statusDetail.textContent=detail;
+  el.statusTitle.style.color=color||"";
+  if(title==="GOTOVO"){ el.badge.textContent="● DONE"; el.badge.style.color="var(--good)"; el.badge.style.background="#10251a"; }
+  else if(title.includes("GREŠ")||title.includes("FALLBACK")){ el.badge.textContent="● ATTENTION"; el.badge.style.color="var(--bad)"; el.badge.style.background="#2a1416"; }
+  else if(title==="SPREMNO"){ el.badge.textContent="● READY"; el.badge.style.color="var(--good)"; el.badge.style.background="#10251a"; }
+  else { el.badge.textContent="● LIVE"; el.badge.style.color="var(--accent)"; el.badge.style.background="#2a2015"; }
+}
+function normalizeUrl(v, fallback=""){
+  let s=String(v||"").trim();
+  if(!s) s=fallback;
+  return s.replace(/\/+$/,"");
+}
+function localBaseUrl(){
+  // When the app itself is opened through Tailscale HTTPS, LOCAL calls are
+  // same-origin. From GitHub Pages the explicit Tailscale HTTPS endpoint is
+  // used; if that machine is offline the existing router falls back to Modal.
+  if(location.protocol === "https:" && /\.ts\.net$/i.test(location.hostname)){
+    return location.origin;
+  }
+  return normalizeUrl(state.localTtsUrl,DEFAULT_LOCAL_ENDPOINT);
+}
+function countTtsChars(text){
+  const m=String(text||"").match(/[A-Za-zŠĆČŽĐšćčžđ0-9]/g);
+  return m ? m.length : 0;
+}
+function updateEndpointLabel(){
+  if(location.hostname.endsWith("github.io")){
+    el.endpointLabel.textContent="GITHUB HUB • LOCAL ≤90 / MODAL FALLBACK";
+  }else if(location.protocol==="https:" && /\.ts\.net$/i.test(location.hostname)){
+    el.endpointLabel.textContent="TAILSCALE • LOCAL ≤90 / MODAL FALLBACK";
+  }else{
+    el.endpointLabel.textContent="AUTO • LOCAL ≤90 / MODAL FALLBACK";
+  }
+}
+function decodeB64(b64){
+  const bin=atob(b64); const bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+  return new Blob([bytes],{type:"audio/wav"});
+}
+async function fetchWithTimeout(url,opts={},timeoutMs=30000){
+  const ctl=new AbortController();
+  const t=setTimeout(()=>ctl.abort(),timeoutMs);
+  try{
+    return await fetch(url,{...opts,signal:ctl.signal,mode:"cors",cache:"no-store",redirect:"follow"});
+  } finally {
+    clearTimeout(t);
+  }
+}
+async function fetchJson(url,opts={},timeoutMs=30000){
+  const r=await fetchWithTimeout(url,{
+    ...opts,
+    headers:{"Content-Type":"application/json","Accept":"application/json",...(opts.headers||{})}
+  },timeoutMs);
+  const txt=await r.text();
+  let data=null;
+  try{ data=txt?JSON.parse(txt):{}; }catch{ data=txt; }
+  if(!r.ok){
+    const e=new Error(`HTTP ${r.status}: ${typeof data==="string"?data:JSON.stringify(data)}`);
+    e.status=r.status; e.body=data; throw e;
+  }
+  return data;
+}
+function timerLoop(){
+  if(state.busy && state.requestStarted) el.timer.textContent=`${((performance.now()-state.requestStarted)/1000).toFixed(3)} s`;
+  requestAnimationFrame(timerLoop);
+}
+requestAnimationFrame(timerLoop);
+
+// ---------- IndexedDB ----------
+const DB_NAME="OmniVoiceMobileDB", DB_VER=2;
+function openDb(){
+  return new Promise((resolve,reject)=>{
+    const req=indexedDB.open(DB_NAME,DB_VER);
+    req.onupgradeneeded=()=>{
+      const db=req.result;
+      if(!db.objectStoreNames.contains("audio")) db.createObjectStore("audio",{keyPath:"id"});
+      if(!db.objectStoreNames.contains("kv")) db.createObjectStore("kv");
+    };
+    req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error);
+  });
+}
+async function dbPut(store,val,key){
+  const db=await openDb(); return new Promise((res,rej)=>{
+    const tx=db.transaction(store,"readwrite"); const st=tx.objectStore(store);
+    key===undefined?st.put(val):st.put(val,key); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error);
+  });
+}
+async function dbGet(store,key){
+  const db=await openDb(); return new Promise((res,rej)=>{
+    const rq=db.transaction(store).objectStore(store).get(key); rq.onsuccess=()=>res(rq.result); rq.onerror=()=>rej(rq.error);
+  });
+}
+async function dbAll(store){
+  const db=await openDb(); return new Promise((res,rej)=>{
+    const rq=db.transaction(store).objectStore(store).getAll(); rq.onsuccess=()=>res(rq.result||[]); rq.onerror=()=>rej(rq.error);
+  });
+}
+async function dbDelete(store,key){
+  const db=await openDb(); return new Promise((res,rej)=>{
+    const tx=db.transaction(store,"readwrite"); tx.objectStore(store).delete(key); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error);
+  });
+}
+async function restoreFolderHandle(){
+  try{
+    state.folderHandle=await dbGet("kv","folderHandle")||null;
+    state.folderPermissionGranted=state.folderHandle ? await queryFolderPermission(state.folderHandle,true) : false;
+  }catch{
+    state.folderHandle=null;
+    state.folderPermissionGranted=false;
+  }
+}
+
+async function queryFolderPermission(handle,write=true){
+  if(!handle) return false;
+  try{
+    const opt={mode:write?"readwrite":"read"};
+    return (await handle.queryPermission?.(opt))==="granted";
+  }catch{return false;}
+}
+async function requestFolderPermissionFromTap(handle,write=true){
+  if(!handle) return false;
+  try{
+    const opt={mode:write?"readwrite":"read"};
+    if((await handle.queryPermission?.(opt))==="granted") return true;
+    // IMPORTANT: requestPermission must happen from the user's explicit tap.
+    return (await handle.requestPermission?.(opt))==="granted";
+  }catch{return false;}
+}
+async function chooseFolder(){
+  if(!("showDirectoryPicker" in window)){
+    toast("Direktan folder nije dostupan. Koristi SAVE WAV.");
+    return;
+  }
+  try{
+    const h=await window.showDirectoryPicker({mode:"readwrite"});
+    const ok=await requestFolderPermissionFromTap(h,true);
+    if(!ok){ toast("Nije odobren read/write pristup folderu."); return; }
+    state.folderHandle=h;
+    state.folderPermissionGranted=true;
+    try{ await dbPut("kv",h,"folderHandle"); }catch{}
+    toast("Folder povezan za ovu sesiju.");
+    await refreshLibrary(true);
+  }catch(e){
+    if(e.name!=="AbortError") toast("Folder: "+e.message);
+  }
+}
+async function ensureFolderPermissionFromButton(){
+  if(!state.folderHandle){ await chooseFolder(); return !!state.folderHandle && state.folderPermissionGranted; }
+  const ok=await requestFolderPermissionFromTap(state.folderHandle,true);
+  state.folderPermissionGranted=ok;
+  if(ok){ toast("Folder dozvoljen za ovu sesiju."); await refreshLibrary(true); }
+  else toast("Folder nije dozvoljen. Koristi SAVE WAV.");
+  return ok;
+}
+async function writeToFolder(name,blob){
+  if(!state.folderHandle || !state.folderPermissionGranted) return false;
+  try{
+    // Never trigger a permission prompt here: generation finishes asynchronously,
+    // outside the user's tap. Only write if permission is already granted.
+    if(!(await queryFolderPermission(state.folderHandle,true))) return false;
+    const fh=await state.folderHandle.getFileHandle(name,{create:true});
+    const wr=await fh.createWritable();
+    await wr.write(blob);
+    await wr.close();
+    return true;
+  }catch{return false;}
+}
+async function readFolderWavs(){
+  if(!state.folderHandle) return [];
+  try{
+    // No permission popup from background refresh.
+    if(!(await queryFolderPermission(state.folderHandle,false))) return [];
+    const arr=[];
+    for await(const [name,h] of state.folderHandle.entries()){
+      if(h.kind==="file" && /\.wav$/i.test(name)){
+        const f=await h.getFile();
+        arr.push({id:`folder:${name}`,name,blob:f,created:f.lastModified||Date.now(),source:"folder"});
+      }
+    }
+    return arr;
+  }catch{return [];}
+}
+function nextName(){
+  const nums=state.library.map(x=>/^SRV_(\d+)\.wav$/i.exec(x.name)?.[1]).filter(Boolean).map(Number);
+  return `SRV_${String((nums.length?Math.max(...nums):0)+1).padStart(4,"0")}.wav`;
+}
+async function wavDuration(blob){
+  try{
+    const ab=await blob.arrayBuffer();
+    const dv=new DataView(ab);
+    const s=(o,n)=>String.fromCharCode(...new Uint8Array(ab,o,n));
+    if(s(0,4)!=="RIFF"||s(8,4)!=="WAVE") return await mediaDuration(blob);
+    let p=12,rate=0,channels=0,bits=0,dataBytes=0;
+    while(p+8<=ab.byteLength){
+      const id=s(p,4), len=dv.getUint32(p+4,true), d=p+8;
+      if(id==="fmt "){ channels=dv.getUint16(d+2,true); rate=dv.getUint32(d+4,true); bits=dv.getUint16(d+14,true); }
+      if(id==="data"){ dataBytes=len; break; }
+      p=d+len+(len%2);
+    }
+    if(rate&&channels&&bits&&dataBytes) return dataBytes/(rate*channels*(bits/8));
+  }catch{}
+  return mediaDuration(blob);
+}
+function mediaDuration(blob){
+  return new Promise(resolve=>{
+    const a=document.createElement("audio"),u=URL.createObjectURL(blob);
+    a.preload="metadata"; a.onloadedmetadata=()=>{const d=Number.isFinite(a.duration)?a.duration:0;URL.revokeObjectURL(u);resolve(d)};
+    a.onerror=()=>{URL.revokeObjectURL(u);resolve(0)};a.src=u;
+  });
+}
+let libraryRefreshQueue=Promise.resolve(true);
+function refreshLibrary(scanFolder=false){
+  const run=()=>refreshLibraryNow(scanFolder);
+  libraryRefreshQueue=libraryRefreshQueue.then(run,run);
+  return libraryRefreshQueue;
+}
+async function refreshLibraryNow(scanFolder=false){
+  let indexed=[];
+  try{ indexed=await dbAll("audio"); }catch{}
+  let folder=state.library.filter(x=>x.source==="folder");
+  if(scanFolder && state.folderHandle) folder=await readFolderWavs();
+  const map=new Map();
+  for(const x of indexed) map.set(x.name,x);
+  for(const x of folder) map.set(x.name,x);
+  const nextLibrary=[...map.values()].sort((a,b)=>(b.created||0)-(a.created||0));
+  for(const x of nextLibrary) if(!Number.isFinite(x.duration)){ x.duration=await wavDuration(x.blob); if(x.source!=="folder") try{await dbPut("audio",x)}catch{} }
+
+  // Reconciliši izbor koji važi baš u trenutku commit-a, ne onaj sa početka
+  // sporog folder skeniranja. Queue sprečava da stariji refresh pregazi noviji.
+  const previous=state.library.find(x=>x.id===state.selectedId)||null;
+  state.library=nextLibrary;
+  if(previous){
+    let current=state.library.find(x=>x.id===previous.id);
+    if(!current) current=state.library.find(x=>x.name===previous.name);
+    if(!current){
+      clearSelectedItem();
+      renderLibrary();
+      return true;
+    }
+    const changed=current.id!==previous.id || current.created!==previous.created || current.blob?.size!==previous.blob?.size;
+    if(changed){
+      await selectItem(current.id,false);
+      return true;
+    }
+  }
+  renderLibrary();
+  return true;
+}
+let lastLibraryTapId=null;
+let lastLibraryTapAt=0;
+function renderLibrary(){
+  el.libCount.textContent=`${state.library.length} WAV`;
+  if(!state.library.length){ el.fileList.innerHTML='<div class="empty">Nema WAV fajlova.</div>'; return; }
+  el.fileList.innerHTML="";
+  for(const item of state.library){
+    const row=document.createElement("div");
+    row.className="file"+(item.id===state.selectedId?" selected":"");
+    row.dataset.id=item.id;
+    row.innerHTML=`<div class="fname"></div><div class="flen">${fmtClock(item.duration||0)}</div>`;
+    row.querySelector(".fname").textContent=item.name;
+    row.addEventListener("click",async()=>{
+      const now=Date.now();
+      const dbl=lastLibraryTapId===item.id && now-lastLibraryTapAt<650;
+      lastLibraryTapId=item.id;
+      lastLibraryTapAt=dbl?0:now;
+      // Vec izabrani red se ne dekodira ponovo. Dvostruki tap radi kontrolisan
+      // WebAudio restart; stari HTMLAudioElement put vise ne postoji.
+      if(state.selectedId===item.id){
+        if(dbl){
+          stopWebAudio();
+          await playWebAudio();
+        }
+        return;
+      }
+      await selectItem(item.id,false);
+    });
+    row.addEventListener("dblclick",e=>e.preventDefault());
+    el.fileList.appendChild(row);
+  }
+}
+// ---------- MOBILE-SAFE WEB AUDIO PLAYER ----------
+// Najbitnije pravilo: realtime AudioContext se NIKADA ne pravi tokom async
+// generisanja/izbora fajla. Pravi se sinhrono iz PLAY dodira, pa tek onda
+// resume + decode. Time Android dobija pravi media izlaz iz korisnicke akcije.
+// Poznati OmniVoice PCM16 WAV parsiramo sami u stereo AudioBuffer. WebAudio ga
+// zatim standardno renderuje kroz 48 kHz context, bez HTMLMedia/WAV decoder state-a.
+let waCtx=null;
+let waBuffer=null;
+let waSource=null;
+let waSelectedId=null;
+let waStartedAt=0;
+let waOffset=0;
+let waPlaying=false;
+let waLoadSeq=0;
+let waActionSeq=0;
+let waRaf=0;
+let waContextStale=false;
+let waContextWasRunning=false;
+let waContextPrimed=false;
+let waPrimeUntil=0;
+
+function setPlaybackAudioSession(){
+  try{
+    if(navigator.audioSession && navigator.audioSession.type!=="playback"){
+      navigator.audioSession.type="playback";
+    }
+  }catch{}
+}
+
+function setMediaPlaybackState(value){
+  try{ if(navigator.mediaSession) navigator.mediaSession.playbackState=value; }catch{}
+}
+
+function markWebAudioContextStale(ctx=waCtx){
+  if(!ctx || waCtx!==ctx || waContextStale) return;
+  const wasPlaying=waPlaying;
+  const pos=wasPlaying && waBuffer ? waCurrentTime() : waOffset;
+  waContextStale=true;
+  ++waActionSeq;
+  ++waLoadSeq;
+  waPlaying=false;
+  killWebAudioSource();
+  waOffset=Math.max(0,Math.min(pos,waDuration()));
+  el.play.textContent=waBuffer && waOffset>0?"▶ RESUME":"▶ PLAY";
+  updateWebAudioUI();
+  setMediaPlaybackState("paused");
+}
+
+function discardWebAudioContext(){
+  const old=waCtx;
+  waCtx=null;
+  waContextStale=false;
+  waContextWasRunning=false;
+  waContextPrimed=false;
+  waPrimeUntil=0;
+  if(old){
+    try{old.onstatechange=null}catch{}
+    if(old.state!=="closed") void old.close().catch(()=>{});
+  }
+}
+
+function getWebAudioContext(){
+  if(waCtx && waCtx.state!=="closed" && !waContextStale) return waCtx;
+  if(waCtx) discardWebAudioContext();
+
+  setPlaybackAudioSession();
+  const Ctx=window.AudioContext||window.webkitAudioContext;
+  if(!Ctx) throw new Error("Web Audio API nije dostupan u ovom browseru.");
+
+  let ctx;
+  try{
+    ctx=new Ctx({latencyHint:"playback",sampleRate:48000});
+  }catch{
+    ctx=new Ctx({latencyHint:"playback"});
+  }
+  waCtx=ctx;
+  waContextStale=false;
+  waContextWasRunning=ctx.state==="running";
+  waContextPrimed=false;
+  waPrimeUntil=0;
+
+  ctx.onstatechange=()=>{
+    if(waCtx!==ctx) return;
+    if(ctx.state==="running"){
+      waContextWasRunning=true;
+      return;
+    }
+    if(ctx.state==="closed" || ((ctx.state==="suspended" || ctx.state==="interrupted") && waContextWasRunning)){
+      markWebAudioContextStale(ctx);
+    }
+  };
+  return ctx;
+}
+
+function primeWebAudioContext(ctx){
+  if(waContextPrimed || waCtx!==ctx) return waPrimeUntil;
+  // Kratak stereo silent preroll otvara stabilan media output pre govora.
+  const frames=Math.max(1,Math.round(ctx.sampleRate*.06));
+  const silence=ctx.createBuffer(2,frames,ctx.sampleRate);
+  const primer=ctx.createBufferSource();
+  primer.buffer=silence;
+  primer.connect(ctx.destination);
+  primer.onended=()=>{try{primer.disconnect()}catch{}};
+  const startAt=ctx.currentTime;
+  primer.start(startAt);
+  waContextPrimed=true;
+  waPrimeUntil=startAt+frames/ctx.sampleRate;
+  return waPrimeUntil;
+}
+
+function waDuration(){ return waBuffer?.duration || 0; }
+function waCurrentTime(){
+  if(!waBuffer) return 0;
+  if(!waPlaying || !waCtx) return Math.max(0,Math.min(waOffset,waDuration()));
+  return Math.max(0,Math.min(waOffset+(waCtx.currentTime-waStartedAt),waDuration()));
+}
+
+function updateWebAudioUI(){
+  const cur=waCurrentTime(), dur=waDuration() || Number(el.seek.max)||0;
+  if(!el.seek.matches(":active")) el.seek.value=Math.min(cur,Number(el.seek.max)||cur);
+  el.playerTime.textContent=`${fmtClock(cur)} / ${fmtClock(dur)}`;
+  if(waPlaying){ waRaf=requestAnimationFrame(updateWebAudioUI); }
+}
+
+function killWebAudioSource(){
+  if(waSource){
+    try{waSource.onended=null;waSource.stop(0)}catch{}
+    try{waSource.disconnect()}catch{}
+    waSource=null;
+  }
+  if(waRaf){cancelAnimationFrame(waRaf);waRaf=0;}
+}
+
+function fourCC(ab,offset){
+  if(offset<0 || offset+4>ab.byteLength) return "";
+  const u=new Uint8Array(ab,offset,4);
+  return String.fromCharCode(u[0],u[1],u[2],u[3]);
+}
+
+function parsePcm16Wav(ab){
+  if(ab.byteLength<44 || fourCC(ab,0)!=="RIFF" || fourCC(ab,8)!=="WAVE"){
+    throw new Error("Nije RIFF/WAVE fajl.");
+  }
+  const dv=new DataView(ab);
+  const riffBytes=dv.getUint32(4,true)+8;
+  if(riffBytes>ab.byteLength) throw new Error("WAV je nepotpun.");
+
+  let fmtOffset=-1,fmtBytes=0,dataOffset=-1,dataBytes=0;
+  for(let p=12;p+8<=riffBytes;){
+    const id=fourCC(ab,p),len=dv.getUint32(p+4,true),start=p+8;
+    if(start+len>riffBytes) throw new Error(`Neispravan WAV ${id||"chunk"}.`);
+    if(id==="fmt "){fmtOffset=start;fmtBytes=len;}
+    else if(id==="data"){dataOffset=start;dataBytes=len;}
+    p=start+len+(len&1);
+  }
+  if(fmtOffset<0 || fmtBytes<16 || dataOffset<0 || !dataBytes){
+    throw new Error("WAV nema fmt/data blok.");
+  }
+
+  const format=dv.getUint16(fmtOffset,true);
+  const channels=dv.getUint16(fmtOffset+2,true);
+  const sampleRate=dv.getUint32(fmtOffset+4,true);
+  const blockAlign=dv.getUint16(fmtOffset+12,true);
+  const bits=dv.getUint16(fmtOffset+14,true);
+  const extensiblePcm=format===0xfffe && fmtBytes>=40 && dv.getUint16(fmtOffset+24,true)===1;
+  if((format!==1 && !extensiblePcm) || bits!==16 || channels<1 || channels>2 || sampleRate<8000 || sampleRate>96000){
+    throw new Error("WAV nije podržani PCM16 mono/stereo format.");
+  }
+  if(blockAlign!==channels*2 || dataBytes%blockAlign) throw new Error("Neispravan WAV block alignment.");
+
+  const frames=Math.floor(dataBytes/blockAlign);
+  if(!frames) throw new Error("WAV nema audio uzorke.");
+  return {dv,dataOffset,dataBytes,channels,sampleRate,blockAlign,frames};
+}
+
+async function pcm16ToStereoBuffer(ctx,ab,isCurrent){
+  const wav=parsePcm16Wav(ab);
+  // Buffer ostaje na izvornom sample rate-u: standardni AudioBufferSource SRC ga
+  // renderuje u 48 kHz context bez custom filtera, dodatnog tona ili 2x RAM-a.
+  const buffer=ctx.createBuffer(2,wav.frames,wav.sampleRate);
+  const left=buffer.getChannelData(0),right=buffer.getChannelData(1);
+  const chunkFrames=65536;
+  for(let start=0;start<wav.frames;start+=chunkFrames){
+    const end=Math.min(wav.frames,start+chunkFrames);
+    for(let i=start;i<end;i++){
+      const base=wav.dataOffset+i*wav.blockAlign;
+      const l=wav.dv.getInt16(base,true)/32768;
+      left[i]=l;
+      right[i]=wav.channels===2 ? wav.dv.getInt16(base+2,true)/32768 : l;
+    }
+    if(end<wav.frames){
+      await new Promise(resolve=>setTimeout(resolve,0));
+      if(!isCurrent()) return null;
+    }
+  }
+  return {buffer,label:`PCM16 ${wav.sampleRate} Hz • WebAudio SRC→${ctx.sampleRate} Hz • stereo`};
+}
+
+function nativeDecodedForPlayback(ctx,decoded){
+  if(decoded.numberOfChannels>=2) return decoded;
+  const buffer=ctx.createBuffer(2,decoded.length,decoded.sampleRate);
+  const left=decoded.getChannelData(0);
+  buffer.getChannelData(0).set(left);
+  buffer.getChannelData(1).set(left);
+  return buffer;
+}
+
+async function decodeWebAudioItem(item,seq,ctx){
+  const ab=await item.blob.arrayBuffer();
+  if(seq!==waLoadSeq || ctx!==waCtx || state.selectedId!==item.id) return false;
+
+  let playback,label;
+  try{
+    const converted=await pcm16ToStereoBuffer(ctx,ab,()=>seq===waLoadSeq && ctx===waCtx && state.selectedId===item.id);
+    if(!converted) return false;
+    ({buffer:playback,label}=converted);
+  }catch{
+    const decoded=await ctx.decodeAudioData(ab.slice(0));
+    if(seq!==waLoadSeq || ctx!==waCtx || state.selectedId!==item.id) return false;
+    playback=nativeDecodedForPlayback(ctx,decoded);
+    const channelLabel=playback.numberOfChannels===2?"stereo":`${playback.numberOfChannels} ch`;
+    label=`browser decode ${playback.sampleRate} Hz • ${channelLabel}`;
+  }
+
+  if(seq!==waLoadSeq || ctx!==waCtx || state.selectedId!==item.id) return false;
+  waBuffer=playback;
+  waOffset=0;
+  el.seek.max=Math.max(playback.duration,.01);
+  el.seek.value=0;
+  el.seek.disabled=false;
+  el.trackDuration.textContent=fmtClock(playback.duration);
+  el.playerTime.textContent=`00:00 / ${fmtClock(playback.duration)}`;
+  const srcText=item.source==="folder"?"Output folder":"Browser library";
+  el.trackPath.textContent=`${srcText} • ${label} • ${PLAYER_BUILD}`;
+  return true;
+}
+
+function playIntentIsCurrent(action,id,ctx){
+  return action===waActionSeq && state.selectedId===id && waCtx===ctx && !waContextStale && ctx.state==="running";
+}
+
+async function playWebAudio(){
+  const item=state.library.find(x=>x.id===state.selectedId);
+  if(!item) return;
+  if(waPlaying && waSource){
+    if(waCtx?.state==="running" && !waContextStale) return;
+    const pos=waBuffer?waCurrentTime():waOffset;
+    waPlaying=false;
+    killWebAudioSource();
+    waOffset=Math.max(0,Math.min(pos,waDuration()));
+  }
+
+  const action=++waActionSeq;
+  const selectedId=item.id;
+  let ctx=null;
+  try{
+    // Ova sinhrona konstrukcija mora ostati pre prvog await-a: PLAY je user gesture.
+    ctx=getWebAudioContext();
+    // I start() silent unlock-a mora biti u istom gesture task-u (iOS/Safari).
+    const primeUntil=primeWebAudioContext(ctx);
+    setPlaybackAudioSession();
+    if(ctx.state!=="running") await ctx.resume();
+    if(!playIntentIsCurrent(action,selectedId,ctx)) return;
+    if(ctx.state!=="running") throw new Error(`Audio izlaz nije aktivan (${ctx.state}). Tapni PLAY ponovo.`);
+
+    if(!waBuffer || waSelectedId!==item.id){
+      const seq=++waLoadSeq;
+      waSelectedId=item.id;
+      el.play.textContent="… PRIPREMA";
+      setStatus("PLAYER","Pripremam 48 kHz stereo playback u aktivnom audio izlazu…","var(--accent)");
+      const ok=await decodeWebAudioItem(item,seq,ctx);
+      if(!ok || !playIntentIsCurrent(action,selectedId,ctx)) return;
+      setStatus("SPREMNO","WAV je spreman za čistu reprodukciju.","var(--good)");
+    }
+
+    if(!playIntentIsCurrent(action,selectedId,ctx)) return;
+    killWebAudioSource();
+    if(waOffset>=waDuration()-.01) waOffset=0;
+
+    const src=ctx.createBufferSource();
+    src.buffer=waBuffer;
+    src.connect(ctx.destination);
+    waSource=src;
+    src.onended=()=>{
+      if(waSource!==src) return;
+      try{src.disconnect()}catch{}
+      waSource=null;
+      waPlaying=false;
+      waOffset=waDuration();
+      el.seek.value=waOffset;
+      el.playerTime.textContent=`${fmtClock(waOffset)} / ${fmtClock(waDuration())}`;
+      el.play.textContent="▶ PLAY";
+      setMediaPlaybackState("paused");
+      if(waRaf){cancelAnimationFrame(waRaf);waRaf=0;}
+    };
+
+    const offset=Math.max(0,Math.min(waOffset,waDuration()));
+    const startAt=Math.max(ctx.currentTime,primeUntil||0);
+    try{
+      src.start(startAt,offset);
+    }catch(e){
+      if(waSource===src) waSource=null;
+      try{src.onended=null;src.disconnect()}catch{}
+      throw e;
+    }
+    waStartedAt=startAt;
+    waPlaying=true;
+    el.play.textContent="▶ PLAYING";
+    setMediaPlaybackState("playing");
+    updateWebAudioUI();
+  }catch(e){
+    if(action===waActionSeq){
+      waPlaying=false;
+      killWebAudioSource();
+      el.play.textContent="▶ PLAY";
+      setMediaPlaybackState("paused");
+      if(ctx && ctx.state!=="running") waContextStale=true;
+      toast("Audio: "+(e?.message||e));
+      setStatus("PLAYER GREŠKA",String(e?.message||e),"var(--bad)");
+    }
+  }
+}
+
+function pauseWebAudio(){
+  const wasPlaying=waPlaying;
+  const pos=wasPlaying?waCurrentTime():waOffset;
+  ++waActionSeq;
+  waPlaying=false;
+  if(wasPlaying) killWebAudioSource();
+  waOffset=Math.max(0,Math.min(pos,waDuration()));
+  el.play.textContent=waOffset>0?"▶ RESUME":"▶ PLAY";
+  setMediaPlaybackState("paused");
+  updateWebAudioUI();
+}
+
+function stopWebAudio(){
+  ++waActionSeq;
+  ++waLoadSeq;
+  waPlaying=false;
+  killWebAudioSource();
+  // STOP je i eksplicitni recovery: naredni PLAY dobija novu mobilnu audio sesiju.
+  discardWebAudioContext();
+  waOffset=0;
+  el.seek.value=0;
+  el.play.textContent="▶ PLAY";
+  el.playerTime.textContent=`00:00 / ${fmtClock(waDuration())}`;
+  setMediaPlaybackState("paused");
+}
+
+async function seekWebAudio(sec){
+  const wasPlaying=waPlaying;
+  ++waActionSeq;
+  waOffset=Math.max(0,Math.min(+sec||0,waDuration()));
+  if(wasPlaying){
+    waPlaying=false;
+    killWebAudioSource();
+    await playWebAudio();
+  }else{
+    updateWebAudioUI();
+  }
+}
+
+function clearSelectedItem(){
+  ++waActionSeq;
+  ++waLoadSeq;
+  waPlaying=false;
+  killWebAudioSource();
+  discardWebAudioContext();
+  waBuffer=null;
+  waSelectedId=null;
+  waOffset=0;
+  state.selectedId=null;
+  setMediaPlaybackState("none");
+  el.trackName.textContent="Još nema generisanog WAV-a";
+  el.trackPath.textContent=`Izaberi WAV iz biblioteke • ${PLAYER_BUILD}`;
+  el.trackDuration.textContent="00:00";
+  el.seek.max=1;
+  el.seek.value=0;
+  el.seek.disabled=true;
+  el.playerTime.textContent="00:00 / 00:00";
+  el.play.textContent="▶ PLAY";
+  for(const b of [el.play,el.pause,el.stop,el.toStart,el.toEnd]) b.disabled=true;
+}
+
+async function selectItem(id,autoplay=false){
+  const item=state.library.find(x=>x.id===id); if(!item) return;
+  ++waActionSeq;
+  ++waLoadSeq;
+  killWebAudioSource();
+  waPlaying=false;
+  waBuffer=null;
+  waSelectedId=id;
+  waOffset=0;
+  discardWebAudioContext();
+  setMediaPlaybackState("none");
+
+  state.selectedId=id; renderLibrary();
+  el.trackName.textContent=item.name;
+  el.trackPath.textContent=`Tapni PLAY • fresh 48 kHz stereo session • ${PLAYER_BUILD}`;
+  el.trackDuration.textContent=fmtClock(item.duration||0);
+  el.seek.max=Math.max(item.duration||0,.01);el.seek.value=0;el.seek.disabled=true;
+  el.playerTime.textContent=`00:00 / ${fmtClock(item.duration||0)}`;
+  el.play.textContent="▶ PLAY";
+  for(const b of [el.play,el.pause,el.stop,el.toStart,el.toEnd]) b.disabled=false;
+
+  // Programmatic autoplay posle dugog generisanja je namerno zabranjen.
+  // Dozvoljen je samo ako browser i dalje potvrđuje aktivan korisnicki gesture.
+  if(autoplay && (!navigator.userActivation || navigator.userActivation.isActive)) await playWebAudio();
+}
+async function addOutput(name,blob){
+  const duration=await wavDuration(blob);
+  const item={id:`db:${Date.now()}:${Math.random().toString(16).slice(2)}`,name,blob,duration,created:Date.now(),source:"browser"};
+  try{await dbPut("audio",item)}catch{}
+  const wrote=await writeToFolder(name,blob);
+  if(wrote){
+    item.source="folder";
+  }else if(state.folderHandle){
+    // Keep the file safely in IndexedDB; user can explicitly SAVE WAV.
+    setTimeout(()=>toast("WAV je u biblioteci. Za fizički fajl tapni SAVE WAV."),350);
+  }
+  await refreshLibrary(wrote);
+  const match=state.library.find(x=>x.name===name); if(match) await selectItem(match.id,false);
+}
+function downloadCurrent(){
+  const item=state.library.find(x=>x.id===state.selectedId);if(!item)return;
+  const u=URL.createObjectURL(item.blob),a=document.createElement("a");a.href=u;a.download=item.name;a.click();setTimeout(()=>URL.revokeObjectURL(u),2000);
+}
+
+async function saveCurrentExplicit(){
+  const item=state.library.find(x=>x.id===state.selectedId);
+  if(!item){ toast("Prvo izaberi WAV."); return; }
+
+  // Best path: native Save As picker, invoked directly by this button tap.
+  if("showSaveFilePicker" in window){
+    try{
+      const fh=await window.showSaveFilePicker({
+        suggestedName:item.name,
+        startIn:"downloads",
+        types:[{description:"WAV audio",accept:{"audio/wav":[".wav"]}}]
+      });
+      const wr=await fh.createWritable();
+      await wr.write(item.blob);
+      await wr.close();
+      toast("WAV sačuvan.");
+      return;
+    }catch(e){
+      if(e.name==="AbortError") return;
+      // Fall through to ordinary browser download.
+    }
+  }
+
+  // Universal fallback: browser download to Downloads / browser-selected location.
+  const u=URL.createObjectURL(item.blob);
+  const a=document.createElement("a");
+  a.href=u;
+  a.download=item.name;
+  a.style.display="none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(u),5000);
+  toast("WAV poslat u Downloads.");
+}
+
+// ---------- player ----------
+// Playback ide isključivo kroz gesture-bound Web Audio putanju iznad.
+el.play.onclick=async()=>{await playWebAudio();};
+el.pause.onclick=()=>pauseWebAudio();
+el.stop.onclick=()=>stopWebAudio();
+el.toStart.onclick=async()=>{await seekWebAudio(0);};
+el.toEnd.onclick=()=>{pauseWebAudio();waOffset=waDuration();el.seek.value=waOffset;updateWebAudioUI();el.play.textContent="▶ PLAY";};
+el.seek.addEventListener("input",()=>{el.playerTime.textContent=`${fmtClock(+el.seek.value)} / ${fmtClock(waDuration()||+el.seek.max||0)}`;});
+el.seek.addEventListener("change",async()=>{await seekWebAudio(+el.seek.value);});
+
+// ---------- LOCAL + MODAL routing ----------
+async function localHealth(){
+  const base=localBaseUrl();
+  if(!base) throw new Error("LOCAL TTS URL nije podešen.");
+
+  // Simple GET: no application/json Content-Type, so Android Chrome does not
+  // need a CORS/PNA preflight just to check the private Tailscale endpoint.
+  const r=await fetchWithTimeout(
+    `${base}/health`,
+    {method:"GET",headers:{"Accept":"application/json"},targetAddressSpace:"local"},
+    Math.max(2000,state.localHealthTimeoutSec*1000)
+  );
+  if(!r.ok) throw new Error(`LOCAL health HTTP ${r.status}`);
+  return await r.json();
+}
+
+async function runLocal(text,speed,numStep,charCount){
+  const base=localBaseUrl();
+  if(!base) throw new Error("LOCAL TTS URL nije podešen.");
+
+  setStatus("LOCAL CHECK",`Proveravam UM790 Pro preko Tailscale-a • ${charCount}/${LOCAL_CHAR_LIMIT} znakova`,"var(--accent)");
+  el.gpu.textContent="LOCAL • Tailscale • AMD Radeon 780M";
+
+  await localHealth();
+
+  setStatus("LOCAL 780M",`Lokalno generisanje • speed ${speed.toFixed(2)}× • ${numStep} steps`,"var(--good)");
+  const start=performance.now();
+
+  // For LOCAL we deliberately use a simple GET. The text is capped at 90
+  // counted characters, so URL length is tiny, and this avoids the JSON POST
+  // preflight that Android Chrome can block for private/Tailscale addresses.
+  const q=new URLSearchParams({
+    text,
+    speed:String(speed),
+    num_step:String(numStep),
+    _rid:crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`
+  });
+  const r=await fetchWithTimeout(
+    `${base}/tts-get?${q.toString()}`,
+    {method:"GET",headers:{"Accept":"audio/wav"},targetAddressSpace:"local"},
+    Math.max(60000,state.localGenerationTimeoutSec*1000)
+  );
+
+  if(!r.ok){
+    const body=await r.text().catch(()=> "");
+    throw new Error(`LOCAL HTTP ${r.status}${body?`: ${body}`:""}`);
+  }
+
+  const blob=await r.blob();
+  if(!blob.size) throw new Error("LOCAL je vratio prazan WAV.");
+
+  return {blob,httpMs:performance.now()-start};
+}
+
+async function runModal(text,speed,numStep){
+  const endpoint=normalizeUrl(state.modalEndpoint,DEFAULT_MODAL_ENDPOINT);
+  setStatus("MODAL",`Cloud generisanje • speed ${speed.toFixed(2)}× • ${numStep} steps`,"var(--accent)");
+  el.gpu.textContent="MODAL • L4 → A10 → T4 fallback";
+
+  const start=performance.now();
+  const out=await fetchJson(
+    endpoint,
+    {method:"POST",body:JSON.stringify({text,speed,num_step:numStep})},
+    Math.max(30000,state.modalTimeoutSec*1000)
+  );
+  const httpMs=performance.now()-start;
+
+  if(out?.error) throw new Error(String(out.error));
+  if(!out?.audio_base64) throw new Error("Modal odgovor nema audio_base64.");
+
+  return {blob:decodeB64(out.audio_base64),out,httpMs};
+}
+
+async function finishOutput(blob,route,diagLines){
+  const name=nextName();
+  await addOutput(name,blob);
+  const totalMs=performance.now()-state.requestStarted;
+
+  setStatus("GOTOVO",`${route} • sačuvan ${name} • ${(blob.size/1024).toFixed(1)} KB`,"var(--good)");
+  el.timer.textContent=`${(totalMs/1000).toFixed(3)} s`;
+
+  try{navigator.vibrate?.([70,50,120])}catch{}
+  // Nema zasebnog 8 kHz / 8-bit "notification WAV"-a: na Androidu je mogao
+  // da prebaci audio output/decoder u pogresan format neposredno pre playback-a.
+
+  el.diag.textContent=[
+    ...diagLines,
+    "",
+    "===== OUTPUT =====",
+    `Ruta                            : ${route}`,
+    `Player build                    : ${PLAYER_BUILD}`,
+    `WAV bytes                       : ${blob.size}`,
+    `Fajl                            : ${name}`,
+    `UKUPNO → WAV sačuvan            : ${fmtMs(totalMs)}`
+  ].join("\n");
+
+  switchPage("Player");
+}
+
+async function generate(){
+  if(state.busy)return;
+
+  const text=el.text.value.trim();
+  if(!text){toast("Upiši tekst.");return;}
+
+  const charCount=countTtsChars(text);
+  const speed=+el.speed.value;
+  const numStep=+el.steps.value;
+  const preferLocal=charCount<=LOCAL_CHAR_LIMIT;
+
+  state.busy=true;
+  state.requestSeq++;
+  el.generate.disabled=true;
+  el.generate.textContent="GENERISANJE...";
+  el.diag.textContent="Zahtev je u toku…";
+  state.requestStarted=performance.now();
+
+  let localError=null;
+
+  try{
+    if(preferLocal){
+      try{
+        const local=await runLocal(text,speed,numStep,charCount);
+        el.gpu.textContent="LOCAL • AMD Radeon 780M • Tailscale";
+        await finishOutput(local.blob,"LOCAL 780M",[
+          "===== AUTO ROUTER =====",
+          `Broj dozvoljenih znakova        : ${charCount}`,
+          `Pravilo                          : ≤ ${LOCAL_CHAR_LIMIT} → LOCAL`,
+          `Speed                            : ${speed.toFixed(2)}×`,
+          `Steps                            : ${numStep}`,
+          "",
+          "===== LOCAL / TAILSCALE =====",
+          `LOCAL endpoint                   : ${localBaseUrl()}`,
+          `GET /tts-get → WAV              : ${fmtMs(local.httpMs)}`,
+          `GPU                              : AMD Radeon 780M`,
+          "Model                            : BASE_15H_3000STEPS_6144BT • checkpoint-3000"
+        ]);
+        return;
+      }catch(e){
+        localError=e;
+        setStatus("LOCAL FALLBACK",`LOCAL nije dostupan (${String(e?.message||e)}). Prebacujem isti zahtev na Modal…`,"var(--bad)");
+        el.gpu.textContent="LOCAL nije dostupan → MODAL";
+      }
+    }
+
+    const modal=await runModal(text,speed,numStep);
+    const out=modal.out||{};
+    const t=out.timings_ms||{};
+    const routeLabel=preferLocal ? "MODAL FALLBACK" : "MODAL";
+    el.gpu.textContent=out.gpu_name ? `Modal • ${out.gpu_name}` : "Modal • L4 → A10 → T4 fallback";
+
+    await finishOutput(modal.blob,routeLabel,[
+      "===== AUTO ROUTER =====",
+      `Broj dozvoljenih znakova        : ${charCount}`,
+      `Pravilo                          : ${charCount<=LOCAL_CHAR_LIMIT?`≤ ${LOCAL_CHAR_LIMIT} → LOCAL, pa fallback MODAL`:`> ${LOCAL_CHAR_LIMIT} → MODAL`}`,
+      `Speed                            : ${speed.toFixed(2)}×`,
+      `Steps                            : ${numStep}`,
+      ...(localError?["",`LOCAL greška                     : ${String(localError?.message||localError)}`]:[]),
+      "",
+      "===== MODAL =====",
+      `HTTPS POST → odgovor            : ${fmtMs(modal.httpMs)}`,
+      `GPU / policy                    : ${out.gpu_name||"L4 → A10 → T4 fallback"}`,
+      `Cold-start model load           : ${fmtMs(+t.worker_model_load)}`,
+      `Cold-start voice prompt         : ${fmtMs(+t.worker_voice_prompt)}`,
+      `Cold-start worker init total    : ${fmtMs(+t.worker_init_total)}`,
+      `model.generate                  : ${fmtMs(+t.model_generate)}`,
+      `WAV encode                      : ${fmtMs(+t.wav_encode)}`,
+      `Base64 encode                   : ${fmtMs(+t.base64_encode)}`,
+      `Handler total                   : ${fmtMs(+t.handler_total)}`,
+      `Sample rate                     : ${out.sample_rate||"—"} Hz`
+    ]);
+  }catch(e){
+    const msg=e?.name==="AbortError" ? "Zahtev je istekao (timeout)." : String(e?.message||e);
+    setStatus("GREŠKA",msg,"var(--bad)");
+    el.diag.textContent=`GREŠKA
+
+${String(e?.stack||e)}
+
+Broj dozvoljenih znakova: ${charCount}
+LOCAL URL: ${localBaseUrl()||"nije podešen"}
+MODAL URL: ${normalizeUrl(state.modalEndpoint,DEFAULT_MODAL_ENDPOINT)}`;
+  }finally{
+    state.busy=false;
+    state.requestStarted=0;
+    el.generate.disabled=false;
+    el.generate.textContent="GENERISI →";
+  }
+}
+
+// ---------- settings & UI ----------
+function openSettings(first=false){
+  el.localTtsInput.value=state.localTtsUrl;
+  el.endpointInput.value=state.modalEndpoint;
+  el.requestTimeout.value=state.modalTimeoutSec;
+  el.localHealthTimeout.value=state.localHealthTimeoutSec;
+  el.localGenerationTimeout.value=state.localGenerationTimeoutSec;
+  el.modal.classList.add("show");
+  if(first && !state.localTtsUrl) el.localTtsInput.focus();
+}
+function closeSettings(){el.modal.classList.remove("show")}
+function saveSettings(){
+  state.localTtsUrl=normalizeUrl(el.localTtsInput.value);
+  state.modalEndpoint=normalizeUrl(el.endpointInput.value,DEFAULT_MODAL_ENDPOINT);
+  state.modalTimeoutSec=Math.max(30,Math.min(600,+el.requestTimeout.value||DEFAULT_MODAL_TIMEOUT_SEC));
+  state.localHealthTimeoutSec=Math.max(2,Math.min(20,+el.localHealthTimeout.value||DEFAULT_LOCAL_HEALTH_TIMEOUT_SEC));
+  state.localGenerationTimeoutSec=Math.max(60,Math.min(1200,+el.localGenerationTimeout.value||DEFAULT_LOCAL_GENERATION_TIMEOUT_SEC));
+
+  localStorage.setItem("ov_local_tts_url",state.localTtsUrl);
+  localStorage.setItem("ov_modal_endpoint",state.modalEndpoint);
+  localStorage.setItem("ov_modal_timeout",state.modalTimeoutSec);
+  localStorage.setItem("ov_local_health_timeout",state.localHealthTimeoutSec);
+  localStorage.setItem("ov_local_generation_timeout",state.localGenerationTimeoutSec);
+
+  updateEndpointLabel();
+  closeSettings();
+  toast("AUTO routing podešavanja sačuvana.");
+}
+async function testLocal(){
+  state.localTtsUrl=normalizeUrl(el.localTtsInput.value);
+  if(!state.localTtsUrl){setStatus("GREŠKA","Unesi Tailscale LOCAL URL.","var(--bad)");toast("Nema LOCAL URL-a.");return;}
+  setStatus("TEST LOCAL","Proveravam /health preko Tailscale-a…","var(--accent)");
+  try{
+    const h=await localHealth();
+    setStatus("SPREMNO",`LOCAL radi • ${h?.service||"LOCAL_TTS"} • ${h?.status||"ready"}`,"var(--good)");
+    toast("LOCAL TTS radi.");
+  }catch(e){
+    setStatus("GREŠKA",`LOCAL test: ${String(e?.message||e)}`,"var(--bad)");
+    toast("LOCAL nije dostupan.");
+  }
+}
+async function testApi(){
+  state.modalEndpoint=normalizeUrl(el.endpointInput.value,DEFAULT_MODAL_ENDPOINT);
+  try{
+    const u=new URL(state.modalEndpoint);
+    if(u.protocol!=="https:") throw new Error("Modal endpoint mora biti HTTPS.");
+    setStatus("SPREMNO","Modal endpoint URL je validan. Test ne pali GPU.","var(--good)");
+    toast("Modal URL izgleda ispravno.");
+  }catch(e){
+    setStatus("GREŠKA",`Modal URL: ${e.message}`,"var(--bad)");
+    toast("Modal URL nije validan.");
+  }
+}
+function switchPage(name){
+  $$(".page").forEach(x=>x.classList.remove("active"));
+  $$(".navbtn").forEach(x=>x.classList.remove("active"));
+  $(`#page${name}`).classList.add("active");
+  $(`.navbtn[data-page="${name}"]`).classList.add("active");
+}
+
+$$(".navbtn").forEach(b=>b.onclick=()=>switchPage(b.dataset.page));
+el.settingsBtn.onclick=()=>openSettings(false);
+el.closeSettings.onclick=closeSettings;
+el.modal.addEventListener("click",e=>{if(e.target===el.modal)closeSettings()});
+el.saveSettings.onclick=saveSettings;
+el.testLocal.onclick=testLocal;
+el.testApi.onclick=testApi;
+el.pickFolder.onclick=chooseFolder;
+el.speed.oninput=()=>el.speedValue.textContent=`${(+el.speed.value).toFixed(2)}×`;
+el.steps.oninput=()=>el.stepsValue.textContent=String(+el.steps.value);
+el.generate.onclick=generate;
+el.folder.onclick=async()=>{await ensureFolderPermissionFromButton();};
+el.saveWav.onclick=saveCurrentExplicit;
+el.refresh.onclick=()=>refreshLibrary(true);
+el.importBtn.onclick=()=>el.fileImport.click();
+el.fileImport.onchange=async()=>{
+  for(const f of [...el.fileImport.files]){
+    if(!/\.wav$/i.test(f.name))continue;
+    const item={id:`db:${Date.now()}:${Math.random()}`,name:f.name,blob:f,duration:await wavDuration(f),created:Date.now(),source:"browser"};
+    try{await dbPut("audio",item)}catch{}
+  }
+  el.fileImport.value="";
+  await refreshLibrary(false);
+};
+el.trackName.addEventListener("contextmenu",e=>{e.preventDefault();downloadCurrent();toast("WAV download pokrenut.");});
+document.addEventListener("visibilitychange",()=>{
+  // Background uvek zatvara ovu output sesiju; sledeci PLAY pravi novu iz tapa.
+  if(document.hidden && waCtx) markWebAudioContextStale(waCtx);
+});
+window.addEventListener("pagehide",()=>{ if(waCtx) markWebAudioContextStale(waCtx); });
+window.addEventListener("pageshow",e=>{ if(e.persisted && waCtx) markWebAudioContextStale(waCtx); });
+
+(async function init(){
+  updateEndpointLabel();
+  if(location.protocol === "https:" && /\.ts\.net$/i.test(location.hostname)){
+    state.localTtsUrl = location.origin;
+    localStorage.setItem("ov_local_tts_url", state.localTtsUrl);
+    if(el.localUrl) el.localUrl.value = state.localTtsUrl;
+  }
+  if("serviceWorker" in navigator && location.protocol === "https:"){
+    try{
+      const reg=await navigator.serviceWorker.register(`./sw.js?v=${encodeURIComponent(PLAYER_BUILD)}`, {scope:"./",updateViaCache:"none"});
+      void reg.update().catch(()=>{});
+    }catch(e){ console.warn("SW:", e); }
+  }
+  await restoreFolderHandle();
+  await refreshLibrary(!!state.folderHandle);
+  setStatus("SPREMNO",`GitHub hub: ≤90 LOCAL→MODAL fallback, >90 MODAL • ${PLAYER_BUILD}`);
+  if(!state.localTtsUrl) setTimeout(()=>openSettings(true),250);
+})();
+</script>
+</body>
+</html>
+
