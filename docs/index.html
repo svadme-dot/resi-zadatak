@@ -13,7 +13,7 @@ body{display:grid;place-items:center;color:#687386}
 <div>Pokrećem Matematiku…</div>
 <script>
 (async()=>{
-  const files=['./app/part-0.txt', './app/part-1.txt', './app/part-2.txt', './app/part-3.txt', './app/part-4.txt', './app/part-5.txt', './app/part-6.txt', './app/part-7.txt'];
+  const files=['./app/part-0.txt', './app/part-1.txt', './app/part-2.txt', './app/part-3.txt', './app/part-4.txt', './app/part-5.txt'];
   let b64="";
   for(const file of files){
     const r=await fetch(file,{cache:"no-store"});
