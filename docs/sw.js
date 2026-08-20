@@ -1,17 +1,18 @@
-const CACHE_NAME = "matematika-pwa-v5";
+const CACHE_NAME = "matematika-pwa-v6";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./icon.svg",
-  "./app-v5/part-0.txt?v=5",
-  "./app-v5/part-1.txt?v=5",
-  "./app-v5/part-2.txt?v=5",
-  "./app-v5/part-3.txt?v=5",
-  "./app-v5/part-4.txt?v=5",
-  "./app-v5/part-5.txt?v=5",
-  "./app-v5/part-6.txt?v=5",
-  "./app-v5/part-7.txt?v=5"
+  "./app-v5/part-0.txt?v=6",
+  "./app-v5/part-1.txt?v=6",
+  "./app-v5/part-2.txt?v=6",
+  "./app-v5/part-3.txt?v=6",
+  "./app-v5/part-4.txt?v=6",
+  "./app-v5/part-5a.txt?v=6",
+  "./app-v5/part-5b.txt?v=6",
+  "./app-v5/part-6.txt?v=6",
+  "./app-v5/part-7.txt?v=6"
 ];
 self.addEventListener("install",event=>{event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(APP_SHELL)));self.skipWaiting();});
 self.addEventListener("activate",event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE_NAME).map(key=>caches.delete(key)))));self.clients.claim();});
