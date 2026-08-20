@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Matematika</title>
+<style>
+html,body{margin:0;height:100%;background:#f7f8fb;font-family:system-ui,sans-serif}
+body{display:grid;place-items:center;color:#687386}
+</style>
+</head>
+<body>
+<div>Pokrećem Matematiku…</div>
+<script>
+(async()=>{
+  const files=['./app/part-0.txt', './app/part-1.txt', './app/part-2.txt', './app/part-3.txt', './app/part-4.txt', './app/part-5.txt', './app/part-6.txt', './app/part-7.txt'];
+  let b64="";
+  for(const file of files){
+    const r=await fetch(file,{cache:"no-store"});
+    if(!r.ok) throw new Error("Nedostaje "+file);
+    b64+=await r.text();
+  }
+  const bin=atob(b64.trim());
+  const bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+  const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  const html=await new Response(stream).text();
+  document.open();
+  document.write(html);
+  document.close();
+})().catch(e=>{
+  document.body.innerHTML="<div style='padding:24px'>Ne mogu da pokrenem aplikaciju: "+String(e)+"</div>";
+});
+</script>
+</body>
+</html>
