@@ -1,9 +1,15 @@
-const CACHE_NAME = "matematika-pwa-v1";
+const CACHE_NAME = "matematika-pwa-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
-  "./icon.svg"
+  "./icon.svg",
+  "./app/part-0.txt",
+  "./app/part-1.txt",
+  "./app/part-2.txt",
+  "./app/part-3.txt",
+  "./app/part-4.txt",
+  "./app/part-5.txt"
 ];
 
 self.addEventListener("install", event => {
