@@ -1,0 +1,19 @@
+{
+  "name": "Matematika",
+  "short_name": "Matematika",
+  "description": "Aplikacija za rešavanje školskih matematičkih zadataka uz Google Gemini.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f8fb",
+  "theme_color": "#f7f8fb",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
