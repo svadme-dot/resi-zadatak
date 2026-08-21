@@ -24,6 +24,48 @@
  const needle='      system_instruction: SYSTEM_INSTRUCTION,\n      generation_config: {';
  const replacement='      system_instruction: SYSTEM_INSTRUCTION,\n      tools: [\n        { type: "code_execution" },\n        { type: "google_search" }\n      ],\n      generation_config: {';
  if(!html.includes(needle))throw new Error("Gemini tools patch nije pronađen u aplikaciji.");
- html=html.replace(needle,replacement);document.open();document.write(html);document.close();
+ html=html.replace(needle,replacement);
+
+ // Google Search grounding nije dostupan na besplatnom Gemini API tieru.
+ // Probaj oba alata, ali ako Search vrati 429, odmah ponovi isti zahtev
+ // samo sa Code Execution umesto da se potroše retry-i i sva četiri ključa.
+ const nativeFetch=window.fetch.bind(window);
+ const searchUnavailableKeys=new Set();
+ window.fetch=async(input,init={})=>{
+   const url=typeof input==="string"?input:(input&&input.url)||"";
+   if(!url.includes("generativelanguage.googleapis.com/v1beta/interactions")||typeof init.body!=="string"){
+     return nativeFetch(input,init);
+   }
+
+   let body;
+   try{body=JSON.parse(init.body);}catch{return nativeFetch(input,init);}
+
+   const hasSearch=Array.isArray(body.tools)&&
+     body.tools.some(tool=>tool&&tool.type==="google_search");
+   if(!hasSearch)return nativeFetch(input,init);
+
+   const headers=init.headers||{};
+   const key=typeof headers.get==="function"
+     ?(headers.get("x-goog-api-key")||"")
+     :(headers["x-goog-api-key"]||headers["X-Goog-Api-Key"]||"");
+
+   const withoutSearch=()=>{
+     const fallbackBody={...body,tools:body.tools.filter(tool=>tool&&tool.type!=="google_search")};
+     return {...init,body:JSON.stringify(fallbackBody)};
+   };
+
+   if(searchUnavailableKeys.has(key)){
+     return nativeFetch(input,withoutSearch());
+   }
+
+   const response=await nativeFetch(input,init);
+   if(response.status!==429)return response;
+
+   const fallback=await nativeFetch(input,withoutSearch());
+   if(fallback.ok)searchUnavailableKeys.add(key);
+   return fallback;
+ };
+
+ document.open();document.write(html);document.close();
 })().catch(e=>{document.body.innerHTML="<div style='padding:24px'>Ne mogu da pokrenem aplikaciju: "+String(e)+"</div>";});
 </script></body></html>
