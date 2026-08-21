@@ -1,4 +1,4 @@
-const CACHE_NAME = "matematika-pwa-v9";
+const CACHE_NAME = "matematika-pwa-v10";
 const APP_SHELL = [
   "./",
   "./index.html",
