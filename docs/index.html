@@ -22,8 +22,8 @@
  const bin=atob(b64.trim());const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
  const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));let html=await new Response(stream).text();
  const needle='      system_instruction: SYSTEM_INSTRUCTION,\n      generation_config: {';
- const replacement='      system_instruction: SYSTEM_INSTRUCTION,\n      tools: [\n        { type: "code_execution" }\n      ],\n      generation_config: {';
- if(!html.includes(needle))throw new Error("Gemini Code Execution patch nije pronađen u aplikaciji.");
+ const replacement='      system_instruction: SYSTEM_INSTRUCTION,\n      tools: [\n        { type: "code_execution" }\n      ],\n      generation_config: {\n        thinking_summaries: "auto",';
+ if(!html.includes(needle))throw new Error("Gemini live-thinking patch nije pronađen u aplikaciji.");
  html=html.replace(needle,replacement);document.open();document.write(html);document.close();
 })().catch(e=>{document.body.innerHTML="<div style='padding:24px'>Ne mogu da pokrenem aplikaciju: "+String(e)+"</div>";});
 </script></body></html>
