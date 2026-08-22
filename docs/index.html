@@ -17,24 +17,10 @@
 <body><div>Pokrećem Matematiku…</div>
 <script>
 (async()=>{
- const files=['./app-v5/part-0.txt?v=6', './app-v5/part-1.txt?v=6', './app-v5/part-2.txt?v=6', './app-v5/part-3.txt?v=6', './app-v5/part-4.txt?v=6', './app-v5/part-5a.txt?v=6', './app-v5/part-5b.txt?v=6', './app-v5/part-6.txt?v=6', './app-v5/part-7.txt?v=6']; let b64="";
+const files=['./app-v5/part-0.txt?v=9', './app-v5/part-1.txt?v=9', './app-v5/part-2.txt?v=9', './app-v5/part-3.txt?v=9', './app-v5/part-4.txt?v=9', './app-v5/part-5a.txt?v=9', './app-v5/part-5b.txt?v=9', './app-v5/part-6.txt?v=9', './app-v5/part-7.txt?v=9']; let b64="";
  for(const file of files){const r=await fetch(file,{cache:"no-store"});if(!r.ok)throw new Error("Nedostaje "+file);b64+=await r.text();}
  const bin=atob(b64.trim());const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
- const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));let html=await new Response(stream).text();
- const needle='      system_instruction: SYSTEM_INSTRUCTION,\n      generation_config: {';
- const replacement='      system_instruction: SYSTEM_INSTRUCTION,\n      tools: [\n        { type: "code_execution" }\n      ],\n      generation_config: {\n        thinking_summaries: "auto",';
- if(!html.includes(needle))throw new Error("Gemini live-thinking patch nije pronađen u aplikaciji.");
- html=html.replace(needle,replacement);
- const runtimePatch='<script>(function(){'+
-  'var realSetTimeout=window.setTimeout.bind(window);window.setTimeout=function(fn,ms){var a=[].slice.call(arguments,2);return realSetTimeout.apply(window,[fn,Number(ms)===30000?300000:ms].concat(a));};'+
-  'if(window.AbortSignal&&typeof AbortSignal.timeout==="function"){var realAbortTimeout=AbortSignal.timeout.bind(AbortSignal);AbortSignal.timeout=function(ms){return realAbortTimeout(Number(ms)===30000?300000:ms);};}'+
-  'var nativeFetch=window.fetch.bind(window),active=new Set(),stopUntil=0,btn=null;'+
-  'function ensureBtn(){if(btn&&btn.isConnected)return btn;btn=document.createElement("button");btn.type="button";btn.textContent="■ Stop";btn.setAttribute("aria-label","Zaustavi Gemini odgovor");btn.style.cssText="position:fixed;right:22px;bottom:108px;z-index:2147483647;display:none;border:1px solid rgba(100,110,130,.22);border-radius:18px;padding:10px 16px;background:#fff;color:#b42318;font:700 15px system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.14);touch-action:manipulation";btn.onclick=function(){stopUntil=Date.now()+15000;active.forEach(function(c){try{c.abort("user_stop");}catch(_){}});active.clear();sync();btn.textContent="Zaustavljeno";realSetTimeout(function(){if(btn){btn.textContent="■ Stop";}},1200);};document.body.appendChild(btn);return btn;}'+
-  'function sync(){var b=ensureBtn();b.style.display=active.size?"block":"none";}'+
-  'function done(c){active.delete(c);sync();}'+
-  'window.fetch=async function(input,init){init=init||{};var url=typeof input==="string"?input:(input&&input.url)||"";if(url.indexOf("generativelanguage.googleapis.com/v1beta/interactions")<0)return nativeFetch(input,init);if(Date.now()<stopUntil)throw new DOMException("Zaustavljeno od korisnika","AbortError");var c=new AbortController(),signal=c.signal;if(init.signal){if(AbortSignal.any)signal=AbortSignal.any([init.signal,c.signal]);else init.signal.addEventListener("abort",function(){c.abort();},{once:true});}active.add(c);sync();try{var res=await nativeFetch(input,Object.assign({},init,{signal:signal}));if(res.body){var clone=res.clone(),reader=clone.body.getReader();(async function(){try{for(;;){var x=await reader.read();if(x.done)break;}}catch(_){}finally{done(c);}})();}else done(c);return res;}catch(e){done(c);throw e;}};'+
- '})();<\/script>';
- html=html.replace('<head>','<head>'+runtimePatch);
+ const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));const html=await new Response(stream).text();
  document.open();document.write(html);document.close();
 })().catch(e=>{document.body.innerHTML="<div style='padding:24px'>Ne mogu da pokrenem aplikaciju: "+String(e)+"</div>";});
 </script></body></html>
