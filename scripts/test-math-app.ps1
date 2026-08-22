@@ -71,8 +71,12 @@ Assert-True ($source -match 'activeSolveController\s*=\s*new AbortController') `
   "Stop mora koristiti eksplicitni solve AbortController"
 Assert-True ($source -match 'isUserStopError\(err, solveSignal\)') `
   "send mora posebno obraditi korisnički Stop"
-Assert-True ($source -match '!hasPartial\s*&&\s*isEligibleProfileFallbackError') `
-  "fallback mora zahtevati da nema parcijalnog sadržaja"
+Assert-True ($source -match 'function\s+hasVisibleLiveAnswer\s*\(') `
+  "fallback mora razlikovati thinking od stvarno zapocetog odgovora"
+Assert-True ($source -match 'function\s+canUseNextGoogleProfile\s*\(err\)[\s\S]{0,420}isRetriableDemandError\(err\)\s*&&\s*\r?\n\s*!hasVisibleLiveAnswer\(\)') `
+  "high-demand sme da odbaci samo thinking bez finalnog odgovora"
+Assert-True ($source -match 'const\s+canUseNextProfile\s*=\s*\r?\n\s*canUseNextGoogleProfile\(err\)') `
+  "send mora koristiti thinking-aware profil fallback odluku"
 Assert-True ((Count-Matches $source 'isStalePreviousInteractionError\(err\)\s*&&\s*!hasVisibleLiveOutput\(\)') -eq 2) `
   "stari interaction ID sme da se ponovi samo bez vidljivog parcijalnog izlaza"
 Assert-True ($source -match 'function\s+isModelCapabilityFallbackError\s*\(') `
@@ -108,11 +112,11 @@ Assert-True ($source -notmatch 'google_search|googleSearch|google_search_retriev
 
 Assert-True ($loader -notmatch 'window\.fetch\s*=|AbortSignal\.timeout|realSetTimeout') `
   "loader više ne sme sadržati Stop monkeypatch"
-Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=13') -eq 9) `
+Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=14') -eq 9) `
   "loader mora koristiti svih 9 chunk URL-ova sa v=13"
-Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v19"') `
+Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v20"') `
   "service worker cache mora biti v19"
-Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=13') -eq 9) `
+Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=14') -eq 9) `
   "service worker mora keširati svih 9 chunk URL-ova sa v=13"
 
 & (Join-Path $PSScriptRoot "build-math-app.ps1") -CheckOnly | Out-Null

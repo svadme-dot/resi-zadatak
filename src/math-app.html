@@ -3972,6 +3972,10 @@ window.MathJax = {
     );
   }
 
+  function hasVisibleLiveAnswer() {
+    return Boolean(liveModel?.answer?.trim());
+  }
+
   function beginSolveControl() {
     if (stopButtonHideTimer) {
       clearTimeout(stopButtonHideTimer);
@@ -4071,6 +4075,19 @@ window.MathJax = {
     return (
       status === 0 &&
       /failed to fetch|network|load failed|connection|internet|offline/i.test(message)
+    );
+  }
+
+  function canUseNextGoogleProfile(err) {
+    if (!isEligibleProfileFallbackError(err)) return false;
+    if (!hasVisibleLiveOutput()) return true;
+
+    // Thought summary nije finalni odgovor. Ako Google eksplicitno javi
+    // high demand/preopterećenje, bezbedno ga odbaci i probaj sledeći profil.
+    // Čim je finalni odgovor počeo, nikakav fallback ga ne briše.
+    return (
+      isRetriableDemandError(err) &&
+      !hasVisibleLiveAnswer()
     );
   }
 
@@ -6695,10 +6712,8 @@ window.MathJax = {
             err
           );
 
-          const hasPartial = hasVisibleLiveOutput();
           const canUseNextProfile =
-            !hasPartial &&
-            isEligibleProfileFallbackError(err);
+            canUseNextGoogleProfile(err);
 
           if (!canUseNextProfile) {
             throw err;

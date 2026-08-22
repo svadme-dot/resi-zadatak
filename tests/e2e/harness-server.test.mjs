@@ -11,6 +11,8 @@ const IMAGE_MODALITY_MESSAGE =
   'Image input modality is not enabled for models/gemini-3.7-flash-agent';
 const UNSUPPORTED_IMAGE_PAYLOAD_MESSAGE =
   'Unsupported image format/MIME';
+const HIGH_DEMAND_MESSAGE =
+  'gemini-3.7-flash is currently experiencing high demand, spikes in demand are usually temporary. Please try again later.';
 const EXPECTED_EIGHT_PROFILE_ORDER = [
   ['e2e-api-1', PRIMARY_MODEL],
   ['e2e-api-2', PRIMARY_MODEL],
@@ -433,6 +435,107 @@ test('failed interaction completion advances without a sync duplicate', async ()
       harness.requestLog
         .filter(record => record.run === run)
         .some(record => record.body?.stream === false),
+      false
+    );
+  });
+});
+
+test('thinking-only high demand reaches the eighth 3.7-to-3.6 tuple', async () => {
+  await withServer(async base => {
+    const run = 'thinking-only-high-demand';
+    const endpoint =
+      '/__mock/gemini/v1beta/interactions?alt=sse' +
+      '&scenario=thought-high-demand-to-3.6&run=' + run;
+    const expectedOrder = EXPECTED_EIGHT_PROFILE_ORDER;
+
+    for (let index = 0; index < expectedOrder.length; index++) {
+      const [apiKey, model] = expectedOrder[index];
+      const response = await postSolver(
+        base,
+        endpoint,
+        solverBodyForModel(model),
+        apiKey
+      );
+      assert.equal(response.status, 200);
+      const wire = await response.text();
+
+      if (index < 7) {
+        const thoughtIndex = wire.indexOf('"type":"thought_summary"');
+        const failureIndex = index % 2 === 0
+          ? wire.indexOf('"event_type":"error"')
+          : wire.indexOf('"status":"failed"');
+        assert.ok(thoughtIndex >= 0);
+        assert.ok(failureIndex > thoughtIndex);
+        assert.equal(wire.includes('"type":"model_output"'), false);
+        assert.match(wire, /currently experiencing high demand/i);
+      } else {
+        assert.match(wire, /interaction\.completed/);
+        assert.match(wire, /model_output/);
+      }
+    }
+
+    const assertions = await fetch(
+      base +
+        '/__harness__/assertions?scenario=thought-high-demand-to-3.6&run=' +
+        run
+    ).then(item => item.json());
+    assert.equal(assertions.ok, true);
+    assert.deepEqual(assertions.scenarioChecks, {
+      exactThoughtHighDemandFallbackOrder: true,
+      allFailedTuplesHadThoughtButNoAnswer: true,
+      streamAndTerminalDemandErrorsWereHandled: true,
+      eighthTupleCompleted: true,
+      noSyncDuplicateDuringDemandFallback: true
+    });
+    assert.equal(assertions.counts.solverRequests, 8);
+  });
+});
+
+test('high demand after answer output stops without profile fallback', async () => {
+  await withServer(async base => {
+    const run = 'answer-high-demand-guard';
+    const endpoint =
+      '/__mock/gemini/v1beta/interactions?alt=sse' +
+      '&scenario=answer-high-demand-no-fallback&run=' + run;
+    const response = await postSolver(
+      base,
+      endpoint,
+      solverBodyForModel(PRIMARY_MODEL),
+      'e2e-api-1'
+    );
+    assert.equal(response.status, 200);
+    const wire = await response.text();
+    const thoughtIndex = wire.indexOf('"type":"thought_summary"');
+    const answerIndex = wire.indexOf('"type":"model_output"');
+    const failureIndex = wire.indexOf('"event_type":"error"');
+    assert.ok(thoughtIndex >= 0);
+    assert.ok(answerIndex > thoughtIndex);
+    assert.ok(failureIndex > answerIndex);
+    assert.ok(wire.includes(HIGH_DEMAND_MESSAGE));
+
+    const assertionsUrl =
+      base +
+      '/__harness__/assertions?scenario=answer-high-demand-no-fallback&run=' +
+      run;
+    const assertions = await fetch(assertionsUrl).then(item => item.json());
+    assert.equal(assertions.ok, true);
+    assert.deepEqual(assertions.scenarioChecks, {
+      answerThenHighDemandWasDelivered: true,
+      answerThenHighDemandStoppedImmediately: true
+    });
+    assert.equal(assertions.counts.solverRequests, 1);
+
+    const forbiddenSecond = await postSolver(
+      base,
+      endpoint,
+      solverBodyForModel(PRIMARY_MODEL),
+      'e2e-api-2'
+    );
+    assert.equal(forbiddenSecond.status, 409);
+    const afterForbidden = await fetch(assertionsUrl).then(item => item.json());
+    assert.equal(afterForbidden.ok, false);
+    assert.equal(
+      afterForbidden.scenarioChecks.answerThenHighDemandStoppedImmediately,
       false
     );
   });

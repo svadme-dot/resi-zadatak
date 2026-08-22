@@ -74,12 +74,29 @@ bootstrap supplies fake local API slots automatically. The PNG is reproducible:
      `errors[]` modality message. API 2/3.7 must follow directly; a
      `stream:false` POST on API 1 is a failure.
 
-8. Unsupported image payload is not model fallback
+8. Thinking-only high demand continues through 3.7 to 3.6
+   - Open Thinking-only high demand reaches 3.6.
+   - The first seven tuples each emit a visible `thought_summary` but no
+     `model_output`, then alternate between a stream `error` and a terminal
+     `interaction.completed` failure carrying a high-demand message.
+   - The app must discard each failed attempt's thinking, try API 1–4 on 3.7,
+     then API 1–4 on 3.6, and complete on the eighth tuple (API 4/3.6). Any
+     sync duplicate or skipped tuple makes the assertions fail.
+
+9. High demand after answer output must not continue
+   - Open Answer then high demand must not continue.
+   - API 1/3.7 emits both a `thought_summary` and a real `model_output` delta,
+     then the same classified high-demand stream error.
+   - Exactly one request may exist. The already-started answer must be kept and
+     no other key or model may be attempted. The separate Slow/Stop scenario
+     continues to prove that user Stop also blocks every later profile.
+
+10. Unsupported image payload is not model fallback
    - Open Unsupported image payload must stop.
    - The generic `Unsupported image format/MIME` error must leave exactly one
      API 1/3.7 request and must never traverse keys or models.
 
-9. Reload then retry an unanswered send
+11. Reload then retry an unanswered send
    - Reset evidence and open Reload then empty-Send retry (automatic).
    - The harness chooses the real PNG, enters its fixed test prompt, starts a
      request, and reloads while that first SSE connection is still unanswered.

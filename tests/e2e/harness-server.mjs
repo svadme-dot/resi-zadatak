@@ -17,6 +17,8 @@ const IMAGE_MODALITY_MESSAGE =
   'Image input modality is not enabled for models/gemini-3.7-flash-agent';
 const UNSUPPORTED_IMAGE_PAYLOAD_MESSAGE =
   'Unsupported image format/MIME';
+const HIGH_DEMAND_MESSAGE =
+  'gemini-3.7-flash is currently experiencing high demand, spikes in demand are usually temporary. Please try again later.';
 const EXPECTED_EIGHT_PROFILE_ORDER = [
   ['e2e-api-1', PRIMARY_MODEL],
   ['e2e-api-2', PRIMARY_MODEL],
@@ -27,6 +29,8 @@ const EXPECTED_EIGHT_PROFILE_ORDER = [
   ['e2e-api-3', FALLBACK_MODEL],
   ['e2e-api-4', FALLBACK_MODEL]
 ];
+const EXPECTED_THOUGHT_HIGH_DEMAND_ORDER =
+  EXPECTED_EIGHT_PROFILE_ORDER.map(tuple => [...tuple]);
 const VALID_SCENARIOS = new Set([
   'success',
   'slow',
@@ -35,6 +39,8 @@ const VALID_SCENARIOS = new Set([
   'partial-no-continue',
   'sse-error-next-profile',
   'terminal-failed-next-profile',
+  'thought-high-demand-to-3.6',
+  'answer-high-demand-no-fallback',
   'payload-error-no-fallback',
   'retry-after-reload'
 ]);
@@ -297,6 +303,52 @@ function evaluateRequests(requestLog, options = {}) {
         record.body?.model === PRIMARY_MODEL &&
         record.body?.stream === false
       );
+  }
+
+  if (scenario === 'thought-high-demand-to-3.6') {
+    const actualOrder = solverRecords.map(record => [
+      record.apiKey,
+      String(record.body?.model || '')
+    ]);
+    const failedAttempts = solverRecords.slice(0, 7);
+    scenarioChecks.exactThoughtHighDemandFallbackOrder =
+      JSON.stringify(actualOrder) ===
+      JSON.stringify(EXPECTED_THOUGHT_HIGH_DEMAND_ORDER);
+    scenarioChecks.allFailedTuplesHadThoughtButNoAnswer =
+      failedAttempts.length === 7 &&
+      failedAttempts.every(record =>
+        /currently experiencing high demand/i.test(
+          String(record.response?.message || '')
+        ) &&
+        record.response?.thoughtOutput === true &&
+        record.response?.answerOutput === false
+      );
+    scenarioChecks.streamAndTerminalDemandErrorsWereHandled =
+      failedAttempts.filter(record =>
+        record.response?.failureShape === 'stream-error'
+      ).length === 4 &&
+      failedAttempts.filter(record =>
+        record.response?.failureShape === 'terminal-failed'
+      ).length === 3;
+    scenarioChecks.eighthTupleCompleted =
+      solverRecords[7]?.apiKey === 'e2e-api-4' &&
+      solverRecords[7]?.body?.model === FALLBACK_MODEL &&
+      solverRecords[7]?.response?.outcome === 'completed';
+    scenarioChecks.noSyncDuplicateDuringDemandFallback =
+      !solverRecords.some(record => record.body?.stream === false);
+  }
+
+  if (scenario === 'answer-high-demand-no-fallback') {
+    const first = solverRecords[0];
+    scenarioChecks.answerThenHighDemandWasDelivered =
+      first?.response?.outcome === 'answer-high-demand-stream-error' &&
+      first?.response?.message === HIGH_DEMAND_MESSAGE &&
+      first?.response?.thoughtOutput === true &&
+      first?.response?.answerOutput === true;
+    scenarioChecks.answerThenHighDemandStoppedImmediately =
+      solverRecords.length === 1 &&
+      first?.apiKey === 'e2e-api-1' &&
+      first?.body?.model === PRIMARY_MODEL;
   }
 
   if (scenario === 'payload-error-no-fallback') {
@@ -808,12 +860,111 @@ function sendTerminalFailedCompletion(res, record) {
   );
 }
 
+function streamThoughtThenHighDemand(
+  res,
+  record,
+  failureShape,
+  includeAnswer = false
+) {
+  const interactionId =
+    'mock-thought-demand-' + String(record.id).padStart(3, '0');
+  const message = record.body?.model === FALLBACK_MODEL
+    ? HIGH_DEMAND_MESSAGE.replace(PRIMARY_MODEL, FALLBACK_MODEL)
+    : HIGH_DEMAND_MESSAGE;
+  const events = [
+    {
+      event_type: 'interaction.created',
+      interaction: { id: interactionId }
+    },
+    {
+      event_type: 'step.start',
+      index: 0,
+      step: { type: 'thought' }
+    },
+    {
+      event_type: 'step.delta',
+      index: 0,
+      delta: {
+        type: 'thought_summary',
+        content: [{
+          type: 'text',
+          text: 'Analiziram zadatak pre nego što sastavim odgovor. '
+        }]
+      }
+    }
+  ];
+
+  if (includeAnswer) {
+    events.push(
+      {
+        event_type: 'step.start',
+        index: 1,
+        step: { type: 'model_output' }
+      },
+      {
+        event_type: 'step.delta',
+        index: 1,
+        delta: {
+          type: 'text',
+          text: 'Ovo je već započeti konačni odgovor. '
+        }
+      }
+    );
+  }
+
+  if (failureShape === 'terminal-failed') {
+    events.push({
+      event_type: 'interaction.completed',
+      interaction: {
+        id: interactionId,
+        status: 'failed',
+        errors: [{
+          code: 503,
+          status: 'UNAVAILABLE',
+          message
+        }]
+      }
+    });
+  } else {
+    events.push({
+      event_type: 'error',
+      error: {
+        code: 503,
+        status: 'UNAVAILABLE',
+        message
+      }
+    });
+  }
+
+  record.response = {
+    status: 200,
+    outcome: includeAnswer
+      ? 'answer-high-demand-' + failureShape
+      : 'thought-high-demand-' + failureShape,
+    eventsSent: events.length,
+    closedEarly: false,
+    message,
+    failureShape,
+    thoughtOutput: true,
+    answerOutput: includeAnswer
+  };
+
+  res.writeHead(200, {
+    'Cache-Control': 'no-cache, no-store',
+    'Content-Type': 'text/event-stream; charset=utf-8'
+  });
+  res.end(
+    events.map(event => 'data: ' + JSON.stringify(event) + '\n\n').join('') +
+    'data: [DONE]\n\n'
+  );
+}
+
 function harnessBootstrap() {
   const lines = [
     '<script id="math-e2e-bootstrap">',
     '(function () {',
     '  var params = new URLSearchParams(location.search);',
-    '  var allowed = ["success", "slow", "fallback-429", "fallback-eight", "partial-no-continue", "sse-error-next-profile", "terminal-failed-next-profile", "payload-error-no-fallback", "retry-after-reload"];',
+    '  var allowed = ["success", "slow", "fallback-429", "fallback-eight", "partial-no-continue", "sse-error-next-profile", "terminal-failed-next-profile", "thought-high-demand-to-3.6", "answer-high-demand-no-fallback", "payload-error-no-fallback", "retry-after-reload"];',
     '  var scenario = params.get("scenario") || "success";',
     '  if (allowed.indexOf(scenario) === -1) scenario = "success";',
     '  var runId = params.get("run") || scenario;',
@@ -822,7 +973,7 @@ function harnessBootstrap() {
     '    localStorage.clear();',
     '    sessionStorage.setItem(freshKey, "1");',
     '  }',
-    '  var allKeys = ["slow", "fallback-eight", "partial-no-continue", "sse-error-next-profile", "terminal-failed-next-profile", "payload-error-no-fallback"].indexOf(scenario) !== -1;',
+    '  var allKeys = ["slow", "fallback-eight", "partial-no-continue", "sse-error-next-profile", "terminal-failed-next-profile", "thought-high-demand-to-3.6", "answer-high-demand-no-fallback", "payload-error-no-fallback"].indexOf(scenario) !== -1;',
     '  var configuredKeyCount = allKeys ? 4 : scenario === "fallback-429" ? 2 : 1;',
     '  var profiles = [1, 2, 3, 4].map(function (slot) {',
     '    return {',
@@ -930,6 +1081,8 @@ function dashboardHtml(host, port) {
     '<li><a href="' + base + '/docs/?scenario=partial-no-continue&fresh=1">Partial output must not continue</a></li>',
     '<li><a href="' + base + '/docs/?scenario=sse-error-next-profile&fresh=1">Single-line SSE modality error advances</a></li>',
     '<li><a href="' + base + '/docs/?scenario=terminal-failed-next-profile&fresh=1">Failed completion advances without sync duplicate</a></li>',
+    '<li><a href="' + base + '/docs/?scenario=thought-high-demand-to-3.6&fresh=1">Thinking-only high demand reaches 3.6</a></li>',
+    '<li><a href="' + base + '/docs/?scenario=answer-high-demand-no-fallback&fresh=1">Answer then high demand must not continue</a></li>',
     '<li><a href="' + base + '/docs/?scenario=payload-error-no-fallback&fresh=1">Unsupported image payload must stop</a></li>',
     '<li><a href="' + base + '/docs/?scenario=retry-after-reload&fresh=1&run=' + retryRun + '">Reload then empty-Send retry (automatic)</a></li>',
     '</ul></div>',
@@ -942,6 +1095,8 @@ function dashboardHtml(host, port) {
     '<li><a href="/__harness__/assertions?scenario=partial-no-continue">Partial/no-continuation assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=sse-error-next-profile">SSE error propagation assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=terminal-failed-next-profile">Failed completion assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=thought-high-demand-to-3.6">Thinking-only high-demand assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=answer-high-demand-no-fallback">Answer/high-demand guard assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=payload-error-no-fallback">Payload classifier assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=slow&expectStop=1">Stop/abort assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=retry-after-reload&run=' + retryRun + '">Reload/retry assertions</a></li>',
@@ -1253,6 +1408,80 @@ export function createHarnessServer() {
           }
         }
 
+        if (scenario === 'thought-high-demand-to-3.6') {
+          const expected =
+            EXPECTED_THOUGHT_HIGH_DEMAND_ORDER[scenarioRequestIndex - 1];
+          const tupleMatches = Boolean(
+            expected &&
+            expected[0] === apiKey &&
+            expected[1] === body?.model
+          );
+
+          if (!tupleMatches) {
+            record.response = {
+              status: 409,
+              outcome: 'unexpected-thought-demand-continuation',
+              eventsSent: 0,
+              closedEarly: false
+            };
+            sendJson(res, 409, {
+              error: {
+                code: 409,
+                status: 'FAILED_PRECONDITION',
+                message:
+                  'Deterministic mock: expected all 3.7 tuples, then all 3.6 tuples.'
+              }
+            });
+            return;
+          }
+
+          if (scenarioRequestIndex <= 7) {
+            streamThoughtThenHighDemand(
+              res,
+              record,
+              scenarioRequestIndex % 2 === 0
+                ? 'terminal-failed'
+                : 'stream-error'
+            );
+            return;
+          }
+        }
+
+        if (scenario === 'answer-high-demand-no-fallback') {
+          const firstTuple =
+            scenarioRequestIndex === 1 &&
+            apiKey === 'e2e-api-1' &&
+            body?.model === PRIMARY_MODEL;
+
+          if (!firstTuple) {
+            record.response = {
+              status: 409,
+              outcome: 'unexpected-continuation-after-answer-demand',
+              eventsSent: 0,
+              closedEarly: false,
+              thoughtOutput: false,
+              answerOutput: false
+            };
+            sendJson(res, 409, {
+              error: {
+                code: 409,
+                status: 'FAILED_PRECONDITION',
+                message:
+                  'Deterministic mock: high demand after answer output must not traverse profiles.'
+              }
+            });
+            return;
+          }
+
+          streamThoughtThenHighDemand(
+            res,
+            record,
+            'stream-error',
+            true
+          );
+          return;
+        }
+
         if (scenario === 'payload-error-no-fallback') {
           const firstTuple =
             scenarioRequestIndex === 1 &&
@@ -1460,6 +1689,8 @@ if (isMain) {
         'Partial:   http://' + host + ':' + actualPort + '/docs/?scenario=partial-no-continue&fresh=1',
         'SSE error: http://' + host + ':' + actualPort + '/docs/?scenario=sse-error-next-profile&fresh=1',
         'Failed:    http://' + host + ':' + actualPort + '/docs/?scenario=terminal-failed-next-profile&fresh=1',
+        'Demand:    http://' + host + ':' + actualPort + '/docs/?scenario=thought-high-demand-to-3.6&fresh=1',
+        'Answer:    http://' + host + ':' + actualPort + '/docs/?scenario=answer-high-demand-no-fallback&fresh=1',
         'Payload:   http://' + host + ':' + actualPort + '/docs/?scenario=payload-error-no-fallback&fresh=1',
         'Retry:     http://' + host + ':' + actualPort + '/docs/?scenario=retry-after-reload&fresh=1&run=retry-' + Date.now(),
         'Fixture:   ' + path.join(FIXTURES_DIR, 'linear-equation.png'),
