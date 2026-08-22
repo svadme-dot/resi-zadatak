@@ -589,24 +589,6 @@ window.MathJax = {
     color:var(--muted)
   }
   #status.error{color:var(--danger)}
-  .unknownJobActions{
-    display:none;
-    margin:0 3px 8px;
-    padding:10px;
-    border:1px solid rgba(255,138,138,.42);
-    border-radius:14px;
-    background:var(--panel);
-    box-shadow:0 8px 24px rgba(0,0,0,.22)
-  }
-  .unknownJobActions.show{display:block}
-  .unknownJobActions strong{display:block;color:var(--danger);font-size:13px}
-  .unknownJobActions p{margin:5px 0 9px;color:var(--muted);font-size:11px;line-height:1.4}
-  .unknownJobButtons{display:flex;gap:7px;flex-wrap:wrap}
-  .unknownJobButtons button{
-    border:1px solid var(--border);border-radius:10px;padding:8px 10px;
-    background:var(--panel2);color:var(--text);font-weight:700;font-size:11px
-  }
-  .unknownJobButtons .danger{color:var(--danger)}
   #cameraInput,#galleryInput{display:none}
 
   /* Istorija chatova */
@@ -2321,14 +2303,6 @@ window.MathJax = {
     aria-label="Zaustavi Gemini odgovor">■ Stop</button>
 
   <div class="composerWrap">
-    <div id="unknownJobActions" class="unknownJobActions" role="alert" aria-live="assertive">
-      <strong id="unknownJobTitle">Ishod prethodnog pokretanja nije poznat</strong>
-      <p id="unknownJobMessage"></p>
-      <div class="unknownJobButtons">
-        <button id="unknownRetryJob" class="danger" type="button">Pošalji ponovo uz rizik</button>
-        <button id="unknownDiscardJob" type="button">Odustani od lokalnog zapisa</button>
-      </div>
-    </div>
     <div id="previewWrap" class="previewWrap">
       <img id="preview" alt="Izabrana slika">
       <button id="removeImage" title="Ukloni">×</button>
@@ -2561,32 +2535,32 @@ window.MathJax = {
     <div class="apiSlots">
       <div class="apiSlot">
         <div class="apiSlotHead"><strong>API ključ 1</strong><span>primarni</span></div>
-        <input id="googleModel1" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.7-flash" readonly aria-readonly="true">
+        <input id="googleModel1" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
         <input id="googleKey1" class="field" type="password" autocomplete="off" placeholder="API ključ 1">
       </div>
 
       <div class="apiSlot">
         <div class="apiSlotHead"><strong>API ključ 2</strong><span>rezerva</span></div>
-        <input id="googleModel2" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.7-flash" readonly aria-readonly="true">
+        <input id="googleModel2" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
         <input id="googleKey2" class="field" type="password" autocomplete="off" placeholder="API ključ 2">
       </div>
 
       <div class="apiSlot">
         <div class="apiSlotHead"><strong>API ključ 3</strong><span>rezerva</span></div>
-        <input id="googleModel3" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.7-flash" readonly aria-readonly="true">
+        <input id="googleModel3" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
         <input id="googleKey3" class="field" type="password" autocomplete="off" placeholder="API ključ 3">
       </div>
 
       <div class="apiSlot">
         <div class="apiSlotHead"><strong>API ključ 4</strong><span>poslednja rezerva</span></div>
-        <input id="googleModel4" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.7-flash" readonly aria-readonly="true">
+        <input id="googleModel4" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
         <input id="googleKey4" class="field" type="password" autocomplete="off" placeholder="API ključ 4">
       </div>
     </div>
 
     <button id="saveKey" class="primary">Sačuvaj API ključeve</button>
     <p class="note">
-      Sva četiri slota koriste fiksno <b>Gemini 3.7 Flash</b>; razlikuju se samo API ključevi.
+      Sva četiri slota koriste fiksno <b>Gemini 3.6 Flash</b>; razlikuju se samo API ključevi.
       Ključevi se čuvaju samo lokalno u <b>localStorage</b>.
     </p>
   </div>
@@ -2596,8 +2570,10 @@ window.MathJax = {
 (() => {
   "use strict";
 
-  const DEFAULT_MODEL = "gemini-3.7-flash";
-  const API_INTERACTIONS_URL =
+  const DEFAULT_MODEL = "gemini-3.6-flash";
+  const API_STREAM_URL =
+    "https://generativelanguage.googleapis.com/v1beta/interactions?alt=sse";
+  const API_SYNC_URL =
     "https://generativelanguage.googleapis.com/v1beta/interactions";
 
   // Novi Google-only fallback sistem: 4 potpuno odvojena slota.
@@ -2606,13 +2582,9 @@ window.MathJax = {
   // Stari single-key storage ostaje samo zbog automatske migracije u slot 1.
   const KEY_STORAGE = "gemini_api_key_persistent_v1";
   const CHATS_STORAGE = "gemini_mobile_chats_v1";
-  const CHAT_TOMBSTONES_STORAGE = "gemini_mobile_chat_tombstones_v1";
   const CHAT_ZOOM_STORAGE = "gemini_school_chat_zoom_v1";
   const THEME_STORAGE = "matematika_theme_v1";
   const USED_IMAGES_GRID_STORAGE = "matematika_used_images_grid_v1";
-  const GLOBAL_JOB_LEASE_STORAGE = "matematika_background_global_lease_v2";
-  const GLOBAL_JOB_LOCK_NAME = "matematika-background-create-gate-v2";
-  const TAB_INSTANCE_ID = makeChatId();
 
   const IMAGE_DB_NAME = "matematika_chat_images_v1";
   const IMAGE_DB_STORE = "images";
@@ -2651,11 +2623,6 @@ window.MathJax = {
   const preview = el("preview");
   const previewWrap = el("previewWrap");
   const statusEl = el("status");
-  const unknownJobActions = el("unknownJobActions");
-  const unknownJobTitle = el("unknownJobTitle");
-  const unknownJobMessage = el("unknownJobMessage");
-  const unknownRetryJob = el("unknownRetryJob");
-  const unknownDiscardJob = el("unknownDiscardJob");
   const keyOverlay = el("keyOverlay");
   const googleModelInputs = [1,2,3,4].map(i => el(`googleModel${i}`));
   const googleKeyInputs = [1,2,3,4].map(i => el(`googleKey${i}`));
@@ -2677,23 +2644,9 @@ window.MathJax = {
   const advancedSettingsOverlay = el("advancedSettingsOverlay");
 
   let busy = false;
-  // Create POST se namerno nikada ne abortuje: bez odgovora ne znamo da li je
-  // server već napravio posao. AbortController važi samo za GET/SSE prikazivač.
-  let activeViewerController = null;
+  let activeSolveController = null;
   let userStopRequested = false;
   let stopButtonHideTimer = null;
-  let activeJobRunPromise = null;
-  let activeJobLeaseTimer = null;
-  let activeJobLeaseId = "";
-  let activeJobFenceToken = "";
-  let activeJobLeaseLost = false;
-  let activeWebLockHeld = false;
-  let activeWebLockRelease = null;
-  let lastJobOwnershipError = "";
-  let terminalWriteInProgress = false;
-  let pendingLeaseRetryTimer = null;
-  let localPersistenceHealthy = true;
-  let pendingCheckpointTimer = null;
   let waitingForInitialApiKey = false;
   let selectedImage = null;
   let keyDialogBackTarget = "";
@@ -2701,17 +2654,13 @@ window.MathJax = {
   // Svi završeni/započeti chatovi ostaju lokalno sačuvani.
   let chats = loadChats();
 
-  // Ako postoji nedovršen background posao, odmah otvori baš taj chat.
-  // U suprotnom i dalje počinjemo prazan novi chat kao ranije.
-  const pendingChatOnLoad = findMostRecentPendingChat(chats);
-  let activeChatId = pendingChatOnLoad?.id || makeChatId();
-  let activeChatPersisted = !!pendingChatOnLoad;
-  let history = pendingChatOnLoad
-    ? safeMessages(pendingChatOnLoad.messages)
-    : [];
-  let previousInteractionId = pendingChatOnLoad?.interactionId || "";
-  let previousInteractionProfileId =
-    pendingChatOnLoad?.interactionProfileId || "";
+  // VAŽNO: svaki put kada se HTML ponovo otvori, počinjemo PRAZAN novi chat.
+  // Istoriju ne brišemo; korisnik joj pristupa preko dugmeta "Istorija".
+  let activeChatId = makeChatId();
+  let activeChatPersisted = false;
+  let history = [];
+  let previousInteractionId = "";
+  let previousInteractionProfileId = "";
 
   // Tekući model odgovor dok stiže stream.
   let liveModel = null;
@@ -2789,84 +2738,8 @@ window.MathJax = {
         : "completed",
       hadImage: !!m.hadImage,
       imageId: String(m.imageId || ""),
-      clientTurnId: String(m.clientTurnId || ""),
       timestamp: Number(m.timestamp || 0)
     }));
-  }
-
-  function safePendingJob(raw) {
-    if (!raw || typeof raw !== "object") return null;
-
-    const allowedStages = [
-      "creating",
-      "in_progress",
-      "cancelling",
-      "outcome_unknown",
-      "waiting_create_credentials",
-      "waiting_credentials",
-      "interaction_missing",
-      "quarantined"
-    ];
-    const rawLocalJobId = String(raw.localJobId || "");
-    let stage = allowedStages.includes(raw.stage)
-      ? raw.stage
-      : "quarantined";
-    const interactionId = String(raw.interactionId || "");
-
-    // Ne popravljaj pokvaren zapis novim slučajnim ID-em: takav zapis mora
-    // ostati vidljivo blokiran dok ga korisnik eksplicitno ne odbaci.
-    if (!rawLocalJobId) stage = "quarantined";
-    if (
-      ["in_progress", "waiting_credentials", "interaction_missing"].includes(stage) &&
-      !interactionId
-    ) {
-      stage = "quarantined";
-    }
-
-    const createdAt = Number(raw.createdAt || Date.now());
-    const stepTypes = {};
-
-    if (raw.stepTypes && typeof raw.stepTypes === "object") {
-      for (const [index, type] of Object.entries(raw.stepTypes)) {
-        if (typeof type === "string" && type) stepTypes[index] = type;
-      }
-    }
-
-    return {
-      version: 1,
-      localJobId: rawLocalJobId,
-      createAttemptId: String(raw.createAttemptId || rawLocalJobId || ""),
-      stage,
-      interactionId,
-      slot: Math.max(1, Math.min(4, Number(raw.slot || 1))),
-      profileId: String(raw.profileId || ""),
-      model: DEFAULT_MODEL,
-      keyFingerprint: String(raw.keyFingerprint || ""),
-      lastEventId: String(raw.lastEventId || ""),
-      requestText: String(raw.requestText || DEFAULT_IMAGE_PROMPT),
-      imageId: String(raw.imageId || ""),
-      imageMimeType: String(raw.imageMimeType || "image/jpeg"),
-      hadImage: !!raw.hadImage,
-      thinking: String(raw.thinking || ""),
-      answer: String(raw.answer || ""),
-      thinkingMs: Math.max(0, Number(raw.thinkingMs || 0)),
-      createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
-      updatedAt: Number(raw.updatedAt || createdAt || Date.now()),
-      cancelRequested: !!raw.cancelRequested,
-      pollOnly: !!raw.pollOnly,
-      stepTypes,
-      lastFailureReason: String(raw.lastFailureReason || "")
-    };
-  }
-
-  function findMostRecentPendingChat(items) {
-    return findAllPendingChats(items)
-      .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0] || null;
-  }
-
-  function findAllPendingChats(items = chats) {
-    return (Array.isArray(items) ? items : [])
-      .filter(chat => safePendingJob(chat?.pendingJob));
   }
 
   function makeImageId() {
@@ -3321,8 +3194,7 @@ window.MathJax = {
         titleGenerating: false,
         createdAt: now - 1,
         updatedAt: now - 1,
-        messages: safeMessages(oldMessages),
-        pendingJob: null
+        messages: safeMessages(oldMessages)
       };
 
       return [migrated];
@@ -3341,11 +3213,8 @@ window.MathJax = {
 
     items = migrateOldChatIfNeeded(items);
 
-    const tombstones = loadChatTombstones();
-
     return items
       .filter(c => c && c.id && Array.isArray(c.messages))
-      .filter(c => !tombstones[c.id])
       .map(c => ({
         id: c.id,
         title: c.title || titleFromHistory(c.messages),
@@ -3355,107 +3224,17 @@ window.MathJax = {
         updatedAt: Number(c.updatedAt || c.createdAt || Date.now()),
         interactionId: c.interactionId || "",
         interactionProfileId: c.interactionProfileId || "",
-        messages: safeMessages(c.messages),
-        pendingJob: safePendingJob(c.pendingJob)
+        messages: safeMessages(c.messages)
       }))
       .sort((a,b) => b.updatedAt - a.updatedAt);
   }
 
-  function loadChatTombstones() {
+  function persistChats() {
     try {
-      const parsed = JSON.parse(
-        localStorage.getItem(CHAT_TOMBSTONES_STORAGE) || "{}"
-      );
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      return {};
-    }
-  }
-
-  function recordChatTombstone(chatId) {
-    if (!chatId) return;
-    try {
-      const tombstones = loadChatTombstones();
-      tombstones[chatId] = Date.now();
-      localStorage.setItem(
-        CHAT_TOMBSTONES_STORAGE,
-        JSON.stringify(tombstones)
-      );
-    } catch {}
-  }
-
-  function mergeFreshChatsBeforeWrite() {
-    const tombstones = loadChatTombstones();
-    chats = chats.filter(chat => !tombstones[chat.id]);
-
-    const freshChats = loadChats();
-    const localActive = getActiveChat();
-    const localJob = safePendingJob(localActive?.pendingJob);
-    const freshActive = freshChats.find(chat => chat.id === activeChatId);
-    const freshJob = safePendingJob(freshActive?.pendingJob);
-
-    if (activeJobRunPromise || activeJobLeaseId) {
-      if (activeJobLeaseLost || !hasActiveJobOwnership(activeJobLeaseId)) {
-        markJobOwnershipLost("Pisanje je odbijeno bez važećeg globalnog fence-a.");
-        return false;
-      }
-
-      if (terminalWriteInProgress && !localJob) {
-        if (freshJob?.localJobId !== activeJobLeaseId) {
-          markJobOwnershipLost("Terminalni zapis je promenjen u drugom tabu.");
-          return false;
-        }
-      } else if (localJob) {
-        if (freshJob?.localJobId !== localJob.localJobId) {
-          const initialClaimWrite = Boolean(
-            !activeJobRunPromise &&
-            !freshJob &&
-            localJob.localJobId === activeJobLeaseId &&
-            localJob.stage === "creating"
-          );
-          if (!initialClaimWrite) {
-            markJobOwnershipLost("Pending zapis je obrisan ili zamenjen u drugom tabu.");
-            return false;
-          }
-        }
-        if (freshJob?.cancelRequested) {
-          localActive.pendingJob.cancelRequested = true;
-          localActive.pendingJob.stage = "cancelling";
-        }
-      }
-    }
-
-    for (const fresh of freshChats) {
-      if (fresh.id === activeChatId) continue;
-      const index = chats.findIndex(chat => chat.id === fresh.id);
-      if (index < 0) {
-        chats.push(fresh);
-      } else if (
-        Number(fresh.updatedAt || 0) > Number(chats[index].updatedAt || 0)
-      ) {
-        chats[index] = fresh;
-      }
-    }
-    return true;
-  }
-
-  function persistChats(renderList = true) {
-    let saved = false;
-    try {
-      if (!mergeFreshChatsBeforeWrite()) return false;
       chats.sort((a,b) => b.updatedAt - a.updatedAt);
       localStorage.setItem(CHATS_STORAGE, JSON.stringify(chats));
-      saved = true;
-    } catch (err) {
-      localPersistenceHealthy = false;
-      console.error("[Lokalno čuvanje chatova nije uspelo]", err);
-      setStatus(
-        "Lokalno čuvanje nije uspelo — trajni nastavak nije bezbedno uključen.",
-        true
-      );
-    }
-    if (renderList) renderHistoryList();
-    return saved;
+    } catch {}
+    renderHistoryList();
   }
 
   function saveHistory() {
@@ -3474,10 +3253,9 @@ window.MathJax = {
         titleGenerating: false,
         createdAt: now,
         updatedAt: now,
-          interactionId: previousInteractionId || "",
-          interactionProfileId: previousInteractionProfileId || "",
-          messages: safe,
-          pendingJob: null
+        interactionId: previousInteractionId || "",
+        interactionProfileId: previousInteractionProfileId || "",
+        messages: safe
       };
       chats.push(chat);
       activeChatPersisted = true;
@@ -3495,397 +3273,25 @@ window.MathJax = {
       chat.interactionProfileId = previousInteractionProfileId || "";
     }
 
-    return persistChats();
+    persistChats();
   }
 
-  function getActiveChat() {
-    return chats.find(c => c.id === activeChatId) || null;
-  }
+  function saveCurrentInteractionId(id, profileId = "") {
+    previousInteractionId = id || "";
+    previousInteractionProfileId =
+      previousInteractionId ? profileId : "";
 
-  function getActivePendingJob() {
-    return safePendingJob(getActiveChat()?.pendingJob);
-  }
-
-  function setActivePendingJob(rawJob, renderList = true) {
-    const chat = getActiveChat();
-    if (!chat) return null;
-    const next = safePendingJob(rawJob);
-    if (!next) return null;
-    if (activeJobLeaseId) {
-      assertActiveJobOwnership(activeJobLeaseId);
-      if (next.localJobId !== activeJobLeaseId) return null;
+    const chat = chats.find(c => c.id === activeChatId);
+    if (chat) {
+      chat.interactionId = previousInteractionId;
+      chat.interactionProfileId = previousInteractionProfileId;
+      chat.updatedAt = Date.now();
+      persistChats();
     }
-
-    chat.pendingJob = next;
-    chat.updatedAt = Date.now();
-    return persistChats(renderList) ? chat.pendingJob : null;
-  }
-
-  function clearActivePendingJob() {
-    const chat = getActiveChat();
-    if (!chat) return;
-    if (activeJobRunPromise) assertActiveJobOwnership(activeJobLeaseId);
-    chat.pendingJob = null;
-  }
-
-  class LeaseLostError extends Error {
-    constructor(message = "Drugi tab je preuzeo ovaj background posao.") {
-      super(message);
-      this.name = "LeaseLostError";
-    }
-  }
-
-  function readGlobalJobLease() {
-    try {
-      return JSON.parse(localStorage.getItem(GLOBAL_JOB_LEASE_STORAGE) || "null");
-    } catch {
-      return null;
-    }
-  }
-
-  function hasActiveJobOwnership(localJobId = activeJobLeaseId) {
-    if (
-      !localJobId ||
-      !activeJobFenceToken ||
-      activeJobLeaseLost ||
-      !activeWebLockHeld
-    ) {
-      return false;
-    }
-    const lease = readGlobalJobLease();
-    return Boolean(
-      lease?.ownerTabId === TAB_INSTANCE_ID &&
-      lease?.localJobId === localJobId &&
-      lease?.fenceToken === activeJobFenceToken
-    );
-  }
-
-  function markJobOwnershipLost(reason = "Vlasništvo posla je promenjeno.") {
-    if (activeJobLeaseLost) return;
-    activeJobLeaseLost = true;
-    if (activeJobLeaseTimer) {
-      clearInterval(activeJobLeaseTimer);
-      activeJobLeaseTimer = null;
-    }
-    if (pendingCheckpointTimer) {
-      clearTimeout(pendingCheckpointTimer);
-      pendingCheckpointTimer = null;
-    }
-    activeViewerController?.abort();
-    console.warn("[Background fence izgubljen]", reason);
-  }
-
-  function assertActiveJobOwnership(localJobId = activeJobLeaseId) {
-    if (!hasActiveJobOwnership(localJobId)) {
-      markJobOwnershipLost("Globalni fence više ne pripada ovom tabu.");
-      throw new LeaseLostError();
-    }
-  }
-
-  function withGlobalCreationGate(callback) {
-    if (!navigator.locks?.request) {
-      // localStorage read/write nije atomski compare-and-swap. Nasumično
-      // čekanje bi i dalje dozvolilo dva POST-a, zato fail-closed.
-      lastJobOwnershipError =
-        "Ovaj browser ne podržava bezbedni Web Locks create gate; zahtev nije poslat.";
-      setStatus(lastJobOwnershipError, true);
-      return Promise.resolve(false);
-    }
-
-    return new Promise(resolve => {
-      let acquisitionSettled = false;
-      const settleAcquisition = value => {
-        if (acquisitionSettled) return;
-        acquisitionSettled = true;
-        resolve(!!value);
-      };
-
-      try {
-        const requestPromise = navigator.locks.request(
-          GLOBAL_JOB_LOCK_NAME,
-          { mode: "exclusive", ifAvailable: true },
-          async lock => {
-            if (!lock) {
-              lastJobOwnershipError =
-                "Drugi tab trenutno poseduje globalni Web Lock.";
-              settleAcquisition(false);
-              return false;
-            }
-
-            activeWebLockHeld = true;
-            let accepted = false;
-            try {
-              accepted = !!(await callback());
-            } catch (err) {
-              lastJobOwnershipError =
-                err?.message || "Globalni create gate nije mogao da se potvrdi.";
-              accepted = false;
-            }
-
-            settleAcquisition(accepted);
-            if (!accepted) {
-              activeWebLockHeld = false;
-              return false;
-            }
-
-            // Web Lock ostaje zaključan tokom čitavog runner/create/cancel
-            // životnog ciklusa. localStorage je durable fence/evidence, ali
-            // nikada više nije sam mutex.
-            await new Promise(release => {
-              activeWebLockRelease = release;
-            });
-            activeWebLockRelease = null;
-            activeWebLockHeld = false;
-            return true;
-          }
-        );
-
-        requestPromise.catch(err => {
-          lastJobOwnershipError =
-            err?.message || "Browser je odbio globalni Web Lock.";
-          if (activeWebLockHeld) {
-            markJobOwnershipLost("Globalni Web Lock request je prekinut.");
-          }
-          settleAcquisition(false);
-        });
-      } catch (err) {
-        lastJobOwnershipError =
-          err?.message || "Browser je odbio globalni Web Lock.";
-        settleAcquisition(false);
-      }
-    });
-  }
-
-  async function claimGlobalJobOwnership(
-    localJobId,
-    {
-      allowSameJob = false,
-      allowMultipleForResolution = false,
-      targetChatId = activeChatId
-    } = {}
-  ) {
-    if (!localJobId) return false;
-    lastJobOwnershipError = "";
-
-    return withGlobalCreationGate(async () => {
-      const freshChats = loadChats();
-      const pending = findAllPendingChats(freshChats);
-      const sameSingleJob =
-        pending.length === 1 &&
-        pending[0].pendingJob?.localJobId === localJobId;
-      const resolutionTargetExists = pending.some(chat =>
-        chat.id === targetChatId
-      );
-
-      // Čak i dva različita prazna taba dele jedan app-wide create gate.
-      if (
-        pending.length &&
-        !(allowSameJob && sameSingleJob) &&
-        !(allowMultipleForResolution && resolutionTargetExists)
-      ) {
-        lastJobOwnershipError =
-          "Već postoji drugi sačuvani pending posao; novi zahtev nije dozvoljen.";
-        return false;
-      }
-
-      const now = Date.now();
-      const current = readGlobalJobLease();
-      if (
-        current?.fenceToken &&
-        Number(current.expiresAt || 0) > now &&
-        !(
-          current.ownerTabId === TAB_INSTANCE_ID &&
-          current.localJobId === localJobId
-        )
-      ) {
-        lastJobOwnershipError =
-          "Drugi tab trenutno poseduje globalni background fence.";
-        return false;
-      }
-
-      const fenceToken = makeChatId();
-      const candidate = {
-        ownerTabId: TAB_INSTANCE_ID,
-        localJobId,
-        fenceToken,
-        epoch: Math.max(0, Number(current?.epoch || 0)) + 1,
-        expiresAt: now + 20000
-      };
-
-      try {
-        localStorage.setItem(GLOBAL_JOB_LEASE_STORAGE, JSON.stringify(candidate));
-        const confirmed = readGlobalJobLease();
-        if (confirmed?.fenceToken !== fenceToken) {
-          lastJobOwnershipError =
-            "Drugi tab je dobio create gate; ovaj tab neće slati zahtev.";
-          return false;
-        }
-      } catch {
-        localPersistenceHealthy = false;
-        lastJobOwnershipError =
-          "Lokalni globalni fence nije mogao da se sačuva; zahtev nije poslat.";
-        setStatus(lastJobOwnershipError, true);
-        return false;
-      }
-
-      activeJobLeaseId = localJobId;
-      activeJobFenceToken = fenceToken;
-      activeJobLeaseLost = false;
-      if (pendingLeaseRetryTimer) {
-        clearTimeout(pendingLeaseRetryTimer);
-        pendingLeaseRetryTimer = null;
-      }
-      if (activeJobLeaseTimer) clearInterval(activeJobLeaseTimer);
-      activeJobLeaseTimer = setInterval(renewJobLease, 5000);
-      return true;
-    });
-  }
-
-  function renewJobLease() {
-    if (!hasActiveJobOwnership()) {
-      markJobOwnershipLost("Heartbeat nije potvrdio fencing token.");
-      return false;
-    }
-    // Nema lease write-a van Web Lock-a. Ovo je samo periodična provera da
-    // durable fencing token nije promenjen spolja.
-    return true;
-  }
-
-  function releaseJobLease() {
-    if (activeJobLeaseTimer) {
-      clearInterval(activeJobLeaseTimer);
-      activeJobLeaseTimer = null;
-    }
-
-    const releaseWebLock = activeWebLockRelease;
-    try {
-      const current = readGlobalJobLease();
-      if (
-        current?.ownerTabId === TAB_INSTANCE_ID &&
-        current?.fenceToken === activeJobFenceToken
-      ) {
-        localStorage.removeItem(GLOBAL_JOB_LEASE_STORAGE);
-      }
-    } catch {}
-
-    activeJobLeaseId = "";
-    activeJobFenceToken = "";
-    activeJobLeaseLost = false;
-    activeWebLockRelease = null;
-    activeWebLockHeld = false;
-    try { releaseWebLock?.(); } catch {}
-  }
-
-  function abandonJobLeaseForPagehide() {
-    if (activeJobLeaseTimer) {
-      clearInterval(activeJobLeaseTimer);
-      activeJobLeaseTimer = null;
-    }
-
-    const releaseWebLock = activeWebLockRelease;
-    try {
-      const current = readGlobalJobLease();
-      if (
-        current?.ownerTabId === TAB_INSTANCE_ID &&
-        current?.fenceToken === activeJobFenceToken
-      ) {
-        localStorage.removeItem(GLOBAL_JOB_LEASE_STORAGE);
-      }
-    } catch {}
-
-    // Za razliku od normalnog finally release-a, lost ostaje true. Stari
-    // BFCache promise zato ne može da prođe nijedan sledeći assert čak ni ako
-    // se stranica vrati, dok drugi tab odmah može da preuzme isti pending ID.
-    activeJobLeaseId = "";
-    activeJobFenceToken = "";
-    activeWebLockRelease = null;
-    activeWebLockHeld = false;
-    activeJobLeaseLost = true;
-    try { releaseWebLock?.(); } catch {}
-  }
-
-  function checkpointActivePendingJob(extra = {}, immediate = false) {
-    const chat = getActiveChat();
-    const current = safePendingJob(chat?.pendingJob);
-    if (!chat || !current) return null;
-    if (activeJobRunPromise || activeJobLeaseId) {
-      assertActiveJobOwnership(current.localJobId);
-    }
-
-    chat.pendingJob = safePendingJob({
-      ...current,
-      ...extra,
-      thinking: liveModel?.thinking ?? current.thinking,
-      answer: liveModel?.answer ?? current.answer,
-      thinkingMs: liveModel?.thinkingMs ?? current.thinkingMs,
-      updatedAt: Date.now()
-    });
-    chat.updatedAt = Date.now();
-
-    const writeNow = () => {
-      if (pendingCheckpointTimer) {
-        clearTimeout(pendingCheckpointTimer);
-        pendingCheckpointTimer = null;
-      }
-      persistChats(false);
-    };
-
-    if (immediate) {
-      writeNow();
-    } else if (!pendingCheckpointTimer) {
-      pendingCheckpointTimer = setTimeout(writeNow, 180);
-    }
-
-    return chat.pendingJob;
-  }
-
-  function focusGlobalPendingJob(message = "Aktivno rešavanje mora prvo da se završi ili razreši.") {
-    const freshChats = loadChats();
-    const pendingChats = findAllPendingChats(freshChats);
-    if (!pendingChats.length) return false;
-
-    if (!activeJobRunPromise) chats = freshChats;
-    const target =
-      chats.find(chat => chat.id === activeChatId && safePendingJob(chat.pendingJob)) ||
-      findMostRecentPendingChat(chats);
-
-    if (target && target.id !== activeChatId && !activeJobRunPromise) {
-      activeChatId = target.id;
-      activeChatPersisted = true;
-      history = safeMessages(target.messages);
-      previousInteractionId = target.interactionId || "";
-      previousInteractionProfileId = target.interactionProfileId || "";
-      liveModel = null;
-      render();
-      renderHistoryList();
-    }
-
-    closeSourceSheet();
-    const job = safePendingJob(target?.pendingJob);
-    if (
-      job &&
-      (
-        ["outcome_unknown", "interaction_missing", "quarantined"].includes(job.stage) ||
-        (
-          ["waiting_create_credentials", "waiting_credentials"].includes(job.stage) &&
-          !configuredProfileForJob(job)
-        )
-      )
-    ) {
-      showUnresolvedJobActions(job);
-    } else if (job && !activeJobRunPromise) {
-      void resumePendingSolveIfNeeded();
-    }
-    setStatus(message, true);
-    return true;
   }
 
   function startNewChat() {
-    if (focusGlobalPendingJob()) return false;
-    if (busy) {
-      setStatus("Sačekaj da se trenutna radnja završi.", true);
-      return false;
-    }
+    if (busy) return;
 
     activeChatId = makeChatId();
     activeChatPersisted = false;
@@ -3894,24 +3300,18 @@ window.MathJax = {
     previousInteractionProfileId = "";
 
     clearSelectedImage();
-    hideUnresolvedJobActions();
     setStatus("");
     render();
     renderHistoryList();
     closeHistory();
     promptEl.focus();
-    return true;
   }
 
   function openSavedChat(id) {
-    if (focusGlobalPendingJob()) return false;
-    if (busy) {
-      setStatus("Sačekaj da se trenutna radnja završi.", true);
-      return false;
-    }
+    if (busy) return;
 
     const chat = chats.find(c => c.id === id);
-    if (!chat) return false;
+    if (!chat) return;
 
     activeChatId = chat.id;
     activeChatPersisted = true;
@@ -3921,43 +3321,27 @@ window.MathJax = {
       chat.interactionProfileId || "";
 
     clearSelectedImage();
-    hideUnresolvedJobActions();
     setStatus("");
     render();
     renderHistoryList();
     closeHistory();
     promptEl.focus();
-    return true;
   }
 
   function deleteSavedChat(id) {
-    if (focusGlobalPendingJob("Aktivni background chat ne može da se briše.")) return false;
-    if (busy) {
-      setStatus("Sačekaj da se trenutna radnja završi.", true);
-      return false;
-    }
+    if (busy) return;
 
-    chats = loadChats();
     const chat = chats.find(c => c.id === id);
-    if (!chat) return false;
+    if (!chat) return;
 
-    if (safePendingJob(chat.pendingJob)) {
-      alert("Ovaj chat ima aktivno rešavanje. Prvo ga završi ili zaustavi.");
-      return false;
-    }
-
-    if (!confirm(`Obrisati chat "${chat.title}"?`)) return false;
+    if (!confirm(`Obrisati chat "${chat.title}"?`)) return;
 
     const imageIds = (chat.messages || [])
       .map(m => m?.imageId)
       .filter(Boolean);
 
     chats = chats.filter(c => c.id !== id);
-    recordChatTombstone(id);
-    if (!persistChats()) {
-      setStatus("Brisanje chata nije lokalno potvrđeno; slike nisu obrisane.", true);
-      return false;
-    }
+    persistChats();
 
     for (const imageId of imageIds) {
       void deleteChatImage(imageId);
@@ -3966,7 +3350,6 @@ window.MathJax = {
     if (activeChatId === id) {
       startNewChat();
     }
-    return true;
   }
 
   const MONTH_NAMES_SHORT = [
@@ -4472,18 +3855,7 @@ window.MathJax = {
   }
 
   function googleProfileId(profile) {
-    return `${profile.slot}:${profile.model}:${apiKeyFingerprint(profile.key)}`;
-  }
-
-  function apiKeyFingerprint(key) {
-    const value = String(key || "");
-    if (!value) return "";
-    let hash = 2166136261;
-    for (let i = 0; i < value.length; i++) {
-      hash ^= value.charCodeAt(i);
-      hash = Math.imul(hash, 16777619);
-    }
-    return `k${value.length}_${(hash >>> 0).toString(16)}`;
+    return `${profile.slot}:${profile.model}`;
   }
 
   function populateGoogleApiDialog() {
@@ -4525,111 +3897,29 @@ window.MathJax = {
   }
 
   function setStatus(text = "", error = false) {
-    const persistenceWarning = localPersistenceHealthy
-      ? ""
-      : "⚠ Trajni nastavak nije lokalno sačuvan.";
-    statusEl.textContent = [text, persistenceWarning].filter(Boolean).join(" · ");
-    statusEl.className = error || !localPersistenceHealthy ? "error" : "";
+    statusEl.textContent = text;
+    statusEl.className = error ? "error" : "";
   }
 
-  function hideUnresolvedJobActions() {
-    unknownJobActions.classList.remove("show");
-  }
-
-  function pauseLiveModelForUnresolved(label = "neizvesno") {
-    if (!liveModel) return;
-    if (liveModel.thinkingTimerId) {
-      clearInterval(liveModel.thinkingTimerId);
-      liveModel.thinkingTimerId = null;
-    }
-    const dots = liveModel.details.querySelector(".thinkingLive");
-    if (dots) dots.innerHTML = `<span style="color:#c88">${escapeHtml(label)}</span>`;
-  }
-
-  function showUnresolvedJobActions(job) {
-    if (!job) return;
-    pauseLiveModelForUnresolved();
-    unknownJobActions.classList.add("show");
-    unknownRetryJob.textContent = "Pošalji ponovo uz rizik";
-
-    if (findAllPendingChats(loadChats()).length > 1) {
-      unknownJobTitle.textContent = "Pronađeno je više nedovršenih poslova";
-      unknownJobMessage.textContent =
-        "Aplikacija podržava samo jedno rešavanje odjednom i zato nije nastavila nijedan zahtev. " +
-        "Odbaci ovaj zapis, pa će sledeći sačuvani posao postati vidljiv za bezbedan nastavak.";
-      unknownRetryJob.hidden = true;
-      return;
-    }
-
-    if (job.stage === "waiting_create_credentials") {
-      unknownJobTitle.textContent = "Create zahtev još nije poslat";
-      unknownJobMessage.textContent =
-        "Originalni API ključ više nije dostupan, ali nijedan Google POST nije poslat. " +
-        "Možeš bez rizika od duplikata eksplicitno vezati ovaj zadatak za trenutni ključ istog slota ili odbaciti zapis.";
-      unknownRetryJob.textContent = "Koristi trenutni ključ";
-      unknownRetryJob.hidden = false;
-    } else if (job.stage === "waiting_credentials") {
-      unknownJobTitle.textContent = "Sačuvani Google posao čeka originalni ključ";
-      unknownJobMessage.textContent =
-        `Interaction ID je sačuvan, ali za njegovo praćenje je potreban originalni API ključ ${job.slot}. ` +
-        "Aplikacija neće napraviti novi posao. Možeš vratiti ključ ili eksplicitno odbaciti lokalno praćenje.";
-      unknownRetryJob.hidden = true;
-    } else if (job.stage === "interaction_missing") {
-      unknownJobTitle.textContent = "Sačuvani Google posao više nije dostupan";
-      unknownJobMessage.textContent =
-        "Interaction ID je sačuvan, ali Google vraća 404. Ne šaljemo novi zadatak " +
-        "bez tvoje potvrde; ponovno slanje može napraviti duplikat ako je odgovor samo privremeno nedostupan.";
-      unknownRetryJob.hidden = false;
-    } else if (job.stage === "quarantined") {
-      unknownJobTitle.textContent = "Lokalni zapis posla je oštećen";
-      unknownJobMessage.textContent =
-        "Aplikacija nije izmislila novi ID niti poslala novi zahtev. Ovaj zapis možeš samo eksplicitno odbaciti.";
-      unknownRetryJob.hidden = true;
-    } else {
-      unknownJobTitle.textContent = "Ishod pokretanja nije poznat";
-      unknownJobMessage.textContent =
-        (job.cancelRequested
-          ? "Stop je sačuvan, ali bez interaction ID-a server-side otkazivanje nije moguće potvrditi. "
-          : "") +
-        "Google je možda prihvatio zahtev, ali interaction ID nije stigao. Automatsko ponavljanje je blokirano jer može duplirati posao ili potrošnju.";
-      unknownRetryJob.hidden = false;
+  class UserStopError extends Error {
+    constructor() {
+      super("Zaustavljeno od korisnika.");
+      this.name = "UserStopError";
     }
   }
 
-  function preserveOutcomeUnknown(err) {
-    const job = checkpointActivePendingJob({
-      stage: "outcome_unknown",
-      lastFailureReason: err?.message || String(err)
-    }, true);
-    if (job) showUnresolvedJobActions(job);
-    setStatus(
-      "Ishod create zahteva nije poznat. Nije poslat drugi zahtev; potrebna je tvoja odluka.",
-      true
+  function isUserStopError(err, signal = null) {
+    return Boolean(
+      userStopRequested ||
+      signal?.aborted ||
+      err?.name === "UserStopError"
     );
-    return "outcome_unknown";
   }
 
-  function preserveRecoverableKnownInteraction(stage, err) {
-    const job = checkpointActivePendingJob({
-      stage,
-      lastFailureReason: err?.message || String(err)
-    }, true);
-    if (!job) return "ownership_lost";
-
-    if (stage === "waiting_credentials") {
-      showUnresolvedJobActions(job);
-      waitingForInitialApiKey = true;
-      openKeyDialog();
-      setStatus(
-        `Za isti Interaction ID potreban je originalni API ključ ${job.slot}. Zapis nije obrisan.`,
-        true
-      );
-      return "waiting_key";
+  function throwIfUserStopped(signal = null) {
+    if (isUserStopError(null, signal)) {
+      throw new UserStopError();
     }
-
-    showUnresolvedJobActions(job);
-    setStatus("Sačuvani Interaction ID nije obrisan. Potrebna je tvoja odluka.", true);
-    return "interaction_missing";
   }
 
   function hasVisibleLiveOutput() {
@@ -4646,14 +3936,15 @@ window.MathJax = {
     }
 
     userStopRequested = false;
-    activeViewerController = null;
+    activeSolveController = new AbortController();
     stopGenerationBtn.textContent = "■ Stop";
     stopGenerationBtn.disabled = false;
     stopGenerationBtn.hidden = false;
+    return activeSolveController.signal;
   }
 
   function finishSolveControl(label = "✓ Gotovo") {
-    activeViewerController = null;
+    activeSolveController = null;
     stopGenerationBtn.textContent = label;
     stopGenerationBtn.disabled = true;
     stopGenerationBtn.hidden = false;
@@ -4671,43 +3962,23 @@ window.MathJax = {
   }
 
   function requestUserStop() {
-    if (!busy || userStopRequested) return;
-
-    // Send zaključava UI pre nego što čeka globalni Web Lock. U tom kratkom
-    // pre-dispatch prozoru još nema lease-a ni pending zapisa, ali Stop je
-    // potpuno bezbedan: zapamti lokalnu nameru i send će odustati odmah posle
-    // claim await-a, pre slike, istorije ili POST-a.
-    if (!getActivePendingJob() && !activeJobLeaseId) {
-      userStopRequested = true;
-      stopGenerationBtn.textContent = "Zaustavljam…";
-      stopGenerationBtn.disabled = true;
-      setStatus("Zaustavljeno pre slanja Google zahteva…");
-      return;
-    }
-
-    try {
-      assertActiveJobOwnership(getActivePendingJob()?.localJobId);
-    } catch {
-      setStatus("Drugi tab kontroliše ovaj posao; Stop ovde nije poslat.", true);
+    if (
+      !busy ||
+      !activeSolveController ||
+      activeSolveController.signal.aborted
+    ) {
       return;
     }
 
     userStopRequested = true;
-    checkpointActivePendingJob({
-      cancelRequested: true,
-      stage: "cancelling"
-    }, true);
     stopGenerationBtn.textContent = "Zaustavljam…";
     stopGenerationBtn.disabled = true;
     setStatus("Zaustavljam odgovor i čuvam sve što je već prikazano…");
-    activeViewerController?.abort();
+    activeSolveController.abort();
   }
 
   function isEligibleProfileFallbackError(err) {
-    if (
-      err?.name === "AbortError" ||
-      err?.name === "CreateOutcomeUnknownError"
-    ) {
+    if (isUserStopError(err) || err?.name === "AbortError") {
       return false;
     }
 
@@ -5715,9 +4986,7 @@ window.MathJax = {
     chatEl.appendChild(row);
   }
 
-  function createLiveModelMessage(snapshot = null) {
-    const restored = safePendingJob(snapshot);
-    const createdAtWallClock = Number(restored?.createdAt || Date.now());
+  function createLiveModelMessage() {
     const row = document.createElement("div");
     row.className = "msg model";
 
@@ -5783,31 +5052,18 @@ window.MathJax = {
       answer: "",
       answerStarted: false,
       totalStartedAt: performance.now(),
-      totalStartedAtWallClock: createdAtWallClock,
       totalMs: 0,
       thinkingStartedAt: performance.now(),
-      thinkingStartedAtWallClock: createdAtWallClock,
-      thinkingMs: Number(restored?.thinkingMs || 0),
+      thinkingMs: 0,
       thinkingTimerId: null
     };
 
-    if (restored?.thinking) {
-      updateLiveThinking(restored.thinking, true);
-    }
-
-    if (restored?.answer) {
-      updateLiveAnswer(restored.answer, true);
-    }
-
-    if (!liveModel.answerStarted) {
-      liveModel.thinkingTimerId = setInterval(() => {
-        if (!liveModel || liveModel.answerStarted) return;
-        liveModel.thinkingMs =
-          Date.now() - liveModel.thinkingStartedAtWallClock;
-        liveModel.thinkingTimer.textContent =
-          `Razmišlja: ${formatThinkingTime(liveModel.thinkingMs)}`;
-      }, 100);
-    }
+    liveModel.thinkingTimerId = setInterval(() => {
+      if (!liveModel || liveModel.answerStarted) return;
+      liveModel.thinkingMs = performance.now() - liveModel.thinkingStartedAt;
+      liveModel.thinkingTimer.textContent =
+        `Razmišlja: ${formatThinkingTime(liveModel.thinkingMs)}`;
+    }, 100);
 
     scrollBottom(true);
   }
@@ -5816,7 +5072,6 @@ window.MathJax = {
     if (!liveModel || !textDelta) return;
     liveModel.thinking += textDelta;
     renderModelContent(liveModel.thinkingRendered, liveModel.thinking, false);
-    checkpointActivePendingJob({}, false);
     if (!initial) scrollBottom(false);
   }
 
@@ -5825,10 +5080,7 @@ window.MathJax = {
 
     if (!liveModel.answerStarted) {
       liveModel.answerStarted = true;
-      if (!liveModel.thinkingMs) {
-        liveModel.thinkingMs =
-          Date.now() - liveModel.thinkingStartedAtWallClock;
-      }
+      liveModel.thinkingMs = performance.now() - liveModel.thinkingStartedAt;
       if (liveModel.thinkingTimerId) {
         clearInterval(liveModel.thinkingTimerId);
         liveModel.thinkingTimerId = null;
@@ -5849,7 +5101,6 @@ window.MathJax = {
 
     liveModel.answer += textDelta;
     renderModelContent(liveModel.answerRendered, liveModel.answer, false);
-    checkpointActivePendingJob({}, false);
     if (!initial) scrollBottom(false);
   }
 
@@ -5859,10 +5110,7 @@ window.MathJax = {
     // Ako stream nije stigao do prve answer delte, zaustavi thinking timer sada.
     if (!liveModel.answerStarted) {
       liveModel.answerStarted = true;
-      if (!liveModel.thinkingMs) {
-        liveModel.thinkingMs =
-          Date.now() - liveModel.thinkingStartedAtWallClock;
-      }
+      liveModel.thinkingMs = performance.now() - liveModel.thinkingStartedAt;
 
       if (liveModel.thinkingTimerId) {
         clearInterval(liveModel.thinkingTimerId);
@@ -5886,21 +5134,17 @@ window.MathJax = {
     // Potpuno ga zameni tačnom verzijom iz completed Interaction resursa.
     liveModel.answer = String(fullText);
     renderModelContent(liveModel.answerRendered, liveModel.answer, true);
-    checkpointActivePendingJob({}, true);
     scrollBottom(false);
   }
 
   function finishLiveModel({
     completionState = "completed",
-    emptyAnswer = "Nije pronađen finalni model_output.",
-    clearPendingJob = true
+    emptyAnswer = "Nije pronađen finalni model_output."
   } = {}) {
     if (!liveModel) return;
-    if (activeJobRunPromise) assertActiveJobOwnership(activeJobLeaseId);
 
     if (!liveModel.answerStarted) {
-      liveModel.thinkingMs =
-        Date.now() - liveModel.thinkingStartedAtWallClock;
+      liveModel.thinkingMs = performance.now() - liveModel.thinkingStartedAt;
     }
     if (liveModel.thinkingTimerId) {
       clearInterval(liveModel.thinkingTimerId);
@@ -5931,10 +5175,7 @@ window.MathJax = {
 
     renderModelContent(liveModel.answerRendered, liveModel.answer, true);
 
-    liveModel.totalMs = Math.max(
-      0,
-      Date.now() - liveModel.totalStartedAtWallClock
-    );
+    liveModel.totalMs = performance.now() - liveModel.totalStartedAt;
     const completedAt = Date.now();
 
     const timestamp = makeMessageTimestamp(completedAt);
@@ -5946,37 +5187,16 @@ window.MathJax = {
       makeCompletionMeta(liveModel.totalMs, completionState)
     );
 
-    const terminalTurnId =
-      getActivePendingJob()?.localJobId || "";
-    const finalMessage = {
+    history.push({
       role: "model",
       text: liveModel.answer,
       thinking: liveModel.thinking,
       thinkingMs: liveModel.thinkingMs,
       totalMs: liveModel.totalMs,
       completionState,
-      clientTurnId: terminalTurnId,
       timestamp: completedAt
-    };
-    const existingTerminalIndex = terminalTurnId
-      ? history.findIndex(message =>
-          message?.role === "model" &&
-          message?.clientTurnId === terminalTurnId
-        )
-      : -1;
-
-    if (existingTerminalIndex >= 0) {
-      history[existingTerminalIndex] = finalMessage;
-    } else {
-      history.push(finalMessage);
-    }
-    terminalWriteInProgress = !!clearPendingJob;
-    try {
-      if (clearPendingJob) clearActivePendingJob();
-      saveHistory();
-    } finally {
-      terminalWriteInProgress = false;
-    }
+    });
+    saveHistory();
 
     liveModel = null;
     scrollBottom(true);
@@ -6063,16 +5283,10 @@ window.MathJax = {
     };
   }
 
-  function cleanHistoryForContext(messages, excludeClientTurnId = "") {
+  function cleanHistoryForContext(messages) {
     return (Array.isArray(messages) ? messages : [])
       .slice(-MAX_STATELESS_HISTORY_MESSAGES)
       .filter(m => {
-        if (
-          excludeClientTurnId &&
-          m?.clientTurnId === excludeClientTurnId
-        ) {
-          return false;
-        }
         if (!m?.text) return false;
         if (
           m.role === "model" &&
@@ -6086,8 +5300,8 @@ window.MathJax = {
 
   // Ako je server-side previous_interaction_id istekao (free tier ga ne čuva
   // zauvek), napravi tekstualni kontekst iz naše lokalne istorije i nastavi chat.
-  function buildStatelessContextPrefix(excludeClientTurnId = "") {
-    const items = cleanHistoryForContext(history, excludeClientTurnId);
+  function buildStatelessContextPrefix() {
+    const items = cleanHistoryForContext(history);
     if (!items.length) return "";
 
     const lines = [
@@ -6104,12 +5318,7 @@ window.MathJax = {
     return lines.join("\n");
   }
 
-  function buildInteractionInput(
-    text,
-    img,
-    includeLocalHistory = false,
-    clientTurnId = ""
-  ) {
+  function buildInteractionInput(text, img, includeLocalHistory = false) {
     const finalText = text || DEFAULT_IMAGE_PROMPT;
     const parts = [];
 
@@ -6122,7 +5331,7 @@ window.MathJax = {
     }
 
     const prefix = includeLocalHistory
-      ? buildStatelessContextPrefix(clientTurnId)
+      ? buildStatelessContextPrefix()
       : "";
 
     parts.push({
@@ -6133,25 +5342,15 @@ window.MathJax = {
     return parts;
   }
 
-  function buildInteractionRequest(
-    text,
-    img,
-    model,
-    usePreviousId = true,
-    clientTurnId = ""
-  ) {
+  function buildInteractionRequest(text, img, model, usePreviousId = true) {
     const body = {
       model: DEFAULT_MODEL,
       input: buildInteractionInput(
         text,
         img,
-        !usePreviousId && history.length > 0,
-        clientTurnId
+        !usePreviousId && history.length > 0
       ),
-      // Background posao nastavlja da radi na Google serveru i kada browser
-      // izgubi viewer stream. Rezultat ostaje sačuvan za isti-ID GET/reconnect.
-      background: true,
-      stream: false,
+      stream: true,
       store: true,
       system_instruction: SYSTEM_INSTRUCTION,
       tools: [
@@ -6236,6 +5435,14 @@ window.MathJax = {
     return out.trim();
   }
 
+  function isStalePreviousInteractionError(err) {
+    const msg = String(err?.message || "");
+    return Boolean(previousInteractionId) && (
+      err?.status === 404 ||
+      /previous.?interaction|requested entity was not found|result not found|not found|expired/i.test(msg)
+    );
+  }
+
   function isRetriableDemandError(err) {
     const msg = String(err?.message || "");
     return (
@@ -6246,6 +5453,25 @@ window.MathJax = {
       err?.status === 504 ||
       /high demand|temporar|try again|resource.?exhausted|unavailable|overloaded/i.test(msg)
     );
+  }
+
+  async function sleep(ms, signal = null) {
+    throwIfUserStopped(signal);
+
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+
+      const onAbort = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        reject(new UserStopError());
+      };
+
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   function resetLiveModelForRetry(label = "Ponovni pokušaj…") {
@@ -6260,7 +5486,7 @@ window.MathJax = {
     liveModel.answerStarted = false;
     liveModel.thinkingMs = 0;
     liveModel.thinkingStartedAt = performance.now();
-    liveModel.thinkingStartedAtWallClock = Date.now();
+    liveModel.totalStartedAt = performance.now();
 
     liveModel.thinkingRendered.innerHTML =
       `<span style="color:#7f8da2">${escapeHtml(label)}</span>`;
@@ -6281,511 +5507,426 @@ window.MathJax = {
     liveModel.thinkingTimerId = setInterval(() => {
       if (!liveModel || liveModel.answerStarted) return;
       liveModel.thinkingMs =
-        Date.now() - liveModel.thinkingStartedAtWallClock;
+        performance.now() - liveModel.thinkingStartedAt;
       liveModel.thinkingTimer.textContent =
         `Razmišlja: ${formatThinkingTime(liveModel.thinkingMs)}`;
     }, 100);
-
-    checkpointActivePendingJob({
-      thinking: "",
-      answer: ""
-    }, true);
   }
 
-  class CreateOutcomeUnknownError extends Error {
-    constructor(message) {
-      super(message);
-      this.name = "CreateOutcomeUnknownError";
-    }
-  }
-
-  class PendingCredentialsError extends Error {
-    constructor(message) {
-      super(message);
-      this.name = "PendingCredentialsError";
-    }
-  }
-
-  function interactionHeaders(key, accept = "application/json") {
-    // Revision header se ne šalje iz browsera: aktuelni steps schema je podrazumevan,
-    // a Google CORS preflight za GitHub Pages ne dozvoljava taj custom header.
-    return {
-      "Accept": accept,
-      "x-goog-api-key": key
-    };
-  }
-
-  async function readJsonResponse(response) {
-    try {
-      return await response.json();
-    } catch {
-      return null;
-    }
-  }
-
-  function responseError(response, data) {
-    const error = new Error(
-      data?.error?.message ||
-      data?.message ||
-      `HTTP ${response.status}`
-    );
-    error.status = response.status;
-    error.structuredApiError = !!(data?.error || data?.message);
-    return error;
-  }
-
-  async function createBackgroundInteraction(body, key) {
-    let response;
-    try {
-      response = await fetch(API_INTERACTIONS_URL, {
-        method: "POST",
-        headers: {
-          ...interactionHeaders(key),
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(body)
-      });
-    } catch (err) {
-      throw new CreateOutcomeUnknownError(
-        "Veza je prekinuta tokom pokretanja. Google možda već rešava zadatak, " +
-        "ali ID nije stigao, pa aplikacija neće automatski poslati duplikat."
-      );
-    }
-
-    const data = await readJsonResponse(response);
+  async function fetchInteraction(body, key, signal) {
+    throwIfUserStopped(signal);
+    const response = await fetch(API_STREAM_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        "x-goog-api-key": key
+      },
+      body: JSON.stringify(body),
+      signal
+    });
 
     if (!response.ok) {
-      const err = responseError(response, data);
-      // Samo strukturisana 400/401/403/429 odbijanja su bezbedan dokaz da
-      // create nije prihvaćen. 5xx i nejasni odgovori mogu uslediti posle prijema.
-      err.safeCreateFallback = Boolean(
-        err.structuredApiError &&
-        [400, 401, 403, 429].includes(response.status)
-      );
+      let msg = `HTTP ${response.status}`;
+      try {
+        const data = await response.json();
+        msg = data?.error?.message || data?.message || msg;
+      } catch {}
 
-      if (!err.safeCreateFallback) {
-        throw new CreateOutcomeUnknownError(
-          `${err.message} Odgovor ne potvrđuje da posao nije napravljen; ` +
-          "ne šaljem automatski drugi create zahtev."
-        );
-      }
+      const err = new Error(msg);
+      err.status = response.status;
       throw err;
     }
 
-    if (!data?.id) {
-      throw new CreateOutcomeUnknownError(
-        "Google je prihvatio background zahtev, ali nije vratio interaction ID. " +
-        "Zbog zaštite od duplog rešavanja zahtev se ne ponavlja."
-      );
-    }
-
-    return data;
-  }
-
-  async function getStoredInteraction(interactionId, key, signal = null) {
-    const response = await fetch(
-      `${API_INTERACTIONS_URL}/${encodeURIComponent(interactionId)}`,
-      {
-        method: "GET",
-        headers: interactionHeaders(key),
-        signal
-      }
-    );
-    const data = await readJsonResponse(response);
-    if (!response.ok) throw responseError(response, data);
-    if (!data || typeof data !== "object") {
-      throw new Error("Google je vratio prazan Interaction resurs.");
-    }
-    return data;
-  }
-
-  async function cancelStoredInteraction(interactionId, key) {
-    const response = await fetch(
-      `${API_INTERACTIONS_URL}/${encodeURIComponent(interactionId)}/cancel`,
-      {
-        method: "POST",
-        headers: interactionHeaders(key)
-      }
-    );
-    const data = await readJsonResponse(response);
-    if (!response.ok) throw responseError(response, data);
-    return data || {};
-  }
-
-  function isInteractionTerminal(status) {
-    return [
-      "completed",
-      "failed",
-      "cancelled",
-      "incomplete",
-      "budget_exceeded",
-      "requires_action"
-    ].includes(String(status || ""));
-  }
-
-  function applyCanonicalInteraction(interaction) {
-    if (!liveModel || !interaction) return;
-
-    const answer = extractInteractionOutputText(interaction);
-    if (answer) replaceLiveAnswer(answer);
-
-    const thinking = extractInteractionThoughtSummary(interaction);
-    if (thinking) {
-      liveModel.thinking = thinking;
-      renderModelContent(liveModel.thinkingRendered, thinking, true);
-    }
-
-    checkpointActivePendingJob({}, true);
-  }
-
-  function terminalInteractionError(interaction) {
-    const status = String(interaction?.status || "failed");
-    const listedErrors = Array.isArray(interaction?.errors)
-      ? interaction.errors.filter(Boolean)
-      : [];
-    const message =
-      interaction?.error?.message ||
-      listedErrors.map(item => item?.message || String(item)).filter(Boolean).join("; ") ||
-      interaction?.incomplete_details?.reason ||
-      `Background rešavanje je završeno sa statusom „${status}“.`;
-    const err = new Error(String(message));
-    const code = Number(
-      interaction?.error?.code || listedErrors[0]?.code || 0
-    );
-    if (Number.isFinite(code) && code) err.status = code;
-    err.terminalInteraction = interaction;
-    return err;
-  }
-
-  function isEligibleTerminalFallback(interaction, err) {
-    const status = String(interaction?.status || "");
-    return (
-      ["failed", "budget_exceeded"].includes(status) &&
-      isEligibleProfileFallbackError(err)
-    );
-  }
-
-  async function blobToApiImage(blob, preferredMimeType = "") {
-    if (!blob) return null;
-    const dataUrl = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ""));
-      reader.onerror = () => reject(new Error("Ne mogu ponovo da pročitam sliku."));
-      reader.readAsDataURL(blob);
-    });
-    return {
-      data: dataUrl.split(",")[1] || "",
-      mimeType: preferredMimeType || blob.type || "image/jpeg"
-    };
-  }
-
-  async function imageForPendingJob(job, runtimeImage = null) {
-    if (!job?.hadImage) return null;
-    const inMemory = cloneApiImage(runtimeImage);
-    if (inMemory) return inMemory;
-
-    if (!job.imageId) {
-      throw new Error(
-        "Originalna slika nije trajno sačuvana, pa je neću izostaviti u fallback zahtevu."
-      );
-    }
-
-    const blob = await getChatImageBlob(job.imageId);
-    const restored = await blobToApiImage(blob, job.imageMimeType);
-    if (!restored?.data) {
-      throw new Error(
-        "Originalna slika više nije dostupna; fallback bez slike je namerno sprečen."
-      );
-    }
-    return restored;
-  }
-
-  // GET viewer istog background Interaction-a. Svaki event_id, parcijalni tekst
-  // i stepTypes upisuju se jednim localStorage checkpoint-om pre sledećeg eventa.
-  async function streamStoredInteraction(job, key, signal) {
-    const query = new URLSearchParams({ stream: "true" });
-    if (job.lastEventId) {
-      query.set("last_event_id", job.lastEventId);
-    }
-
-    const response = await fetch(
-      `${API_INTERACTIONS_URL}/${encodeURIComponent(job.interactionId)}?${query}`,
-      {
-        method: "GET",
-        headers: interactionHeaders(key, "text/event-stream"),
-        signal
-      }
-    );
-
-    if (!response.ok) {
-      const data = await readJsonResponse(response);
-      throw responseError(response, data);
-    }
     if (!response.body) {
-      throw new Error("Browser nije dobio background viewer stream.");
+      throw new Error("Browser nije dobio streaming response body.");
     }
 
+    return response;
+  }
+
+  // Robustan SSE reader: ne zavisi od toga gde browser iseče mrežni chunk.
+  async function streamInteraction(body, key, signal) {
+    const response = await fetchInteraction(body, key, signal);
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    const stepTypes = new Map(
-      Object.entries(job.stepTypes || {}).map(([index, type]) => [Number(index), type])
-    );
+
     let buffer = "";
-    let dataLines = [];
-    let completionSignal = false;
+    let pendingDataLines = [];
+
+    let interactionId = "";
+    let completed = false;
+    let completedStatus = "";
+    let answerText = "";
+    let thoughtText = "";
+    let eventCount = 0;
+
+    const stepTypes = new Map();
+
+    const appendThought = chunk => {
+      if (!chunk) return;
+      thoughtText += chunk;
+      updateLiveThinking(chunk);
+    };
+
+    const appendAnswer = chunk => {
+      if (!chunk) return;
+      answerText += chunk;
+      updateLiveAnswer(chunk);
+    };
 
     const processEvent = event => {
       if (!event) return;
-      const eventType = String(event.event_type || "");
-      const replaySensitive = ["step.start", "step.delta"].includes(eventType);
+      eventCount++;
 
-      if (eventType === "error") {
+      const type = event.event_type || "";
+
+      if (type === "error") {
         const err = new Error(
-          event?.error?.message || event?.message || "Gemini viewer stream error."
+          event?.error?.message ||
+          event?.message ||
+          "Gemini Interactions stream error."
         );
         err.code = event?.error?.code || "";
         throw err;
       }
 
-      if (eventType === "step.start") {
+      if (type === "interaction.created") {
+        const id = event?.interaction?.id;
+        if (id) interactionId = id;
+        return;
+      }
+
+      if (type === "interaction.status_update") {
+        if (event?.interaction_id && !interactionId) {
+          interactionId = event.interaction_id;
+        }
+        return;
+      }
+
+      if (type === "step.start") {
         const index = Number(event.index ?? -1);
         const step = event.step || {};
-        if (index >= 0 && step.type) stepTypes.set(index, step.type);
+        if (index >= 0 && step.type) {
+          stepTypes.set(index, step.type);
+        }
 
         if (step.type === "model_output") {
-          updateLiveAnswer(extractContentText(step.content));
+          const initial = extractContentText(step.content);
+          if (initial) appendAnswer(initial);
         } else if (step.type === "thought") {
-          updateLiveThinking(
-            extractContentText(step.summary) || extractContentText(step.content)
-          );
+          const initial =
+            extractContentText(step.summary) ||
+            extractContentText(step.content);
+          if (initial) appendThought(initial);
         }
-      } else if (eventType === "step.delta") {
+        return;
+      }
+
+      if (type === "step.delta") {
         const delta = event.delta || {};
         const stepType = stepTypes.get(Number(event.index ?? -1)) || "";
 
         if (delta.type === "thought_summary") {
-          updateLiveThinking(
-            extractContentText(delta.content) || extractContentText(delta.text)
-          );
-        } else if (delta.type === "text") {
-          const chunk = String(delta.text || "");
-          if (stepType === "thought") updateLiveThinking(chunk);
-          else updateLiveAnswer(chunk);
+          const chunk =
+            extractContentText(delta.content) ||
+            extractContentText(delta.text);
+          if (chunk) appendThought(chunk);
+          return;
         }
-      } else if (eventType === "interaction.completed") {
-        // SSE completion može da bude parcijalan i bez steps. Canonical GET ispod
-        // je jedini izvor konačnog odgovora.
-        completionSignal = true;
+
+        if (delta.type === "text") {
+          const chunk = String(delta.text || "");
+          if (!chunk) return;
+
+          // Text delta pripada step-u čiji je tip najavljen preko step.start.
+          // Ako step.start izostane, tretiraj ga kao finalni output osim ako
+          // nemamo jasan dokaz da je thought step.
+          if (stepType === "thought") {
+            appendThought(chunk);
+          } else {
+            appendAnswer(chunk);
+          }
+          return;
+        }
+
+        return;
       }
 
-      const eventId = String(event.event_id || event.id || "");
-      checkpointActivePendingJob({
-        lastEventId: eventId || getActivePendingJob()?.lastEventId || "",
-        // Bez event_id ne postoji bezbedan cursor za ponovno puštanje delti.
-        // Dovršavamo trenutnu vezu, ali svaki sledeći reconnect ide canonical
-        // polling putem istog Interaction ID-a.
-        pollOnly: replaySensitive && !eventId
-          ? true
-          : !!getActivePendingJob()?.pollOnly,
-        stepTypes: Object.fromEntries(stepTypes)
-      }, true);
+      if (type === "interaction.completed") {
+        const interaction = event.interaction || {};
+        completed = true;
+        completedStatus = interaction.status || "completed";
+
+        if (interaction.id) interactionId = interaction.id;
+
+        // Ako završni SSE događaj sadrži steps, to je najbolji canonical tekst.
+        const canonicalAnswer =
+          extractInteractionOutputText(interaction);
+
+        if (canonicalAnswer) {
+          answerText = canonicalAnswer;
+          replaceLiveAnswer(canonicalAnswer);
+        }
+
+        const canonicalThinking =
+          extractInteractionThoughtSummary(interaction);
+
+        if (canonicalThinking) {
+          thoughtText = canonicalThinking;
+          liveModel.thinking = canonicalThinking;
+          renderModelContent(
+            liveModel.thinkingRendered,
+            canonicalThinking,
+            true
+          );
+        }
+
+        return;
+      }
     };
 
     const flushEvent = () => {
-      if (!dataLines.length) return;
-      const raw = dataLines.join("\n").trim();
-      dataLines = [];
+      if (!pendingDataLines.length) return;
+
+      const raw = pendingDataLines.join("\n").trim();
+      pendingDataLines = [];
+
       if (!raw || raw === "[DONE]") return;
 
-      let parsed;
+      let event;
       try {
-        parsed = JSON.parse(raw);
+        event = JSON.parse(raw);
       } catch {
         return;
       }
-      // processEvent namerno nije u JSON parse catch-u: SSE error mora da izađe.
-      processEvent(parsed);
+
+      processEvent(event);
     };
 
     const consumeLine = rawLine => {
-      const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+      const line = rawLine.endsWith("\r")
+        ? rawLine.slice(0, -1)
+        : rawLine;
+
       if (line === "") {
         flushEvent();
-      } else if (!line.startsWith(":") && line.startsWith("data:")) {
-        dataLines.push(line.slice(5).trimStart());
+        return;
+      }
+
+      if (line.startsWith(":")) return;
+
+      if (line.startsWith("data:")) {
+        pendingDataLines.push(line.slice(5).trimStart());
+
+        // Gemini uglavnom šalje jedan JSON po data: redu.
+        if (pendingDataLines.length === 1) {
+          const raw = pendingDataLines[0].trim();
+          if (raw && raw !== "[DONE]") {
+            try {
+              const parsed = JSON.parse(raw);
+              pendingDataLines = [];
+              processEvent(parsed);
+            } catch {}
+          }
+        }
       }
     };
 
-    while (!completionSignal) {
+    while (true) {
       const { value, done } = await reader.read();
       if (done) break;
+
       buffer += decoder.decode(value, { stream: true });
 
-      let newline;
-      while ((newline = buffer.indexOf("\n")) !== -1) {
-        consumeLine(buffer.slice(0, newline));
-        buffer = buffer.slice(newline + 1);
-        if (completionSignal) break;
+      let nl;
+      while ((nl = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
+        consumeLine(line);
       }
     }
 
-    if (!completionSignal) {
-      buffer += decoder.decode();
-      if (buffer) consumeLine(buffer);
-      flushEvent();
-    } else {
-      try { await reader.cancel(); } catch {}
+    buffer += decoder.decode();
+
+    if (buffer.length) {
+      consumeLine(buffer);
+      buffer = "";
     }
 
-    return { completionSignal };
+    flushEvent();
+
+    return {
+      interactionId,
+      completed,
+      completedStatus,
+      answerText: answerText.trim(),
+      thoughtText: thoughtText.trim(),
+      eventCount
+    };
   }
 
-  function waitForReconnect(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  async function requestInteractionOnce(text, img, key, model, profileId, signal) {
+    // Koristi ISTI model/prompt/config, ali bez streaminga.
+    // Ovo je rezervna mreža za browsere koji izgube SSE završni događaj.
+    const usePreviousId = Boolean(
+      previousInteractionId &&
+      previousInteractionProfileId === profileId
+    );
+    const body =
+      buildInteractionRequest(text, img, model, usePreviousId);
+
+    body.stream = false;
+
+    const response = await fetch(API_SYNC_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "x-goog-api-key": key
+      },
+      body: JSON.stringify(body),
+      signal
+    });
+
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {}
+
+    if (!response.ok) {
+      const msg =
+        data?.error?.message ||
+        data?.message ||
+        `HTTP ${response.status}`;
+
+      const err = new Error(msg);
+      err.status = response.status;
+      throw err;
+    }
+
+    if (!data || typeof data !== "object") {
+      throw new Error("Gemini je vratio prazan non-streaming odgovor.");
+    }
+
+    return {
+      interactionId: data.id || "",
+      completed: data.status === "completed",
+      completedStatus: data.status || "",
+      answerText: extractInteractionOutputText(data),
+      thoughtText: extractInteractionThoughtSummary(data),
+      raw: data
+    };
   }
 
-  async function monitorStoredInteraction(initialJob, profile) {
-    const interactionId = initialJob.interactionId;
-    const localJobId = initialJob.localJobId;
+  async function requestInteractionOnceWithRetry(text, img, key, model, profileId, signal) {
+    let lastErr = null;
 
-    while (true) {
-      assertActiveJobOwnership(localJobId);
-      const job = getActivePendingJob();
-      if (
-        !job ||
-        job.localJobId !== localJobId ||
-        job.interactionId !== interactionId
-      ) {
-        markJobOwnershipLost("Pending zapis je promenjen tokom praćenja.");
-        throw new LeaseLostError();
-      }
-
-      if (!renewJobLease()) throw new LeaseLostError();
-
-      if (job.cancelRequested) {
-        setStatus("Šaljem Stop Google serveru i čuvam prikazani rezultat…");
-        let cancellation = null;
-
-        try {
-          assertActiveJobOwnership(localJobId);
-          cancellation = await cancelStoredInteraction(interactionId, profile.key);
-          assertActiveJobOwnership(localJobId);
-        } catch (cancelErr) {
-          if (cancelErr?.name === "LeaseLostError") throw cancelErr;
-          assertActiveJobOwnership(localJobId);
-          // Ako je cancel zakasnio iza completion-a, canonical GET odlučuje ishod.
-          try {
-            assertActiveJobOwnership(localJobId);
-            cancellation = await getStoredInteraction(interactionId, profile.key);
-            assertActiveJobOwnership(localJobId);
-          } catch (getErr) {
-            if (getErr?.name === "LeaseLostError") throw getErr;
-            assertActiveJobOwnership(localJobId);
-            const definite = Number(getErr?.status || 0);
-            if ([401, 403, 404].includes(definite)) throw getErr;
-            checkpointActivePendingJob({
-              cancelRequested: true,
-              stage: "cancelling",
-              lastFailureReason: cancelErr?.message || String(cancelErr)
-            }, true);
-            setStatus(
-              "Stop je sačuvan lokalno. Čim se veza vrati, prvo ponavljam otkazivanje…"
-            );
-            await waitForReconnect(2200);
-            continue;
-          }
-        }
-
-        assertActiveJobOwnership(localJobId);
-        applyCanonicalInteraction(cancellation);
-        if (isInteractionTerminal(cancellation?.status)) {
-          if (cancellation?.status === "completed") {
-            try {
-              assertActiveJobOwnership(localJobId);
-              const completed = await getStoredInteraction(interactionId, profile.key);
-              assertActiveJobOwnership(localJobId);
-              applyCanonicalInteraction(completed);
-              return completed;
-            } catch (err) {
-              if (err?.name === "LeaseLostError") throw err;
-              assertActiveJobOwnership(localJobId);
-              const definite = Number(err?.status || 0);
-              if ([401, 403, 404].includes(definite)) throw err;
-              checkpointActivePendingJob({
-                cancelRequested: true,
-                stage: "cancelling",
-                lastFailureReason: err?.message || String(err)
-              }, true);
-              await waitForReconnect(1200);
-              continue;
-            }
-          }
-          return cancellation;
-        }
-        await waitForReconnect(700);
-        continue;
-      }
-
-      if (!job.pollOnly) {
-        const viewerController = new AbortController();
-        activeViewerController = viewerController;
-        try {
-          assertActiveJobOwnership(localJobId);
-          await streamStoredInteraction(job, profile.key, viewerController.signal);
-          assertActiveJobOwnership(localJobId);
-        } catch (err) {
-          if (err?.name === "LeaseLostError") throw err;
-          assertActiveJobOwnership(localJobId);
-          const definite = Number(err?.status || 0);
-          if ([401, 403, 404].includes(definite)) throw err;
-          if (Number(err?.status || 0) === 400 && job.lastEventId) {
-            // Istekli cursor prelazi na canonical polling istog ID-a. Ponovno
-            // puštanje streama od početka moglo bi privremeno duplirati delte.
-            checkpointActivePendingJob({
-              lastEventId: "",
-              pollOnly: true
-            }, true);
-          }
-          if (!(err?.name === "AbortError" && getActivePendingJob()?.cancelRequested)) {
-            setStatus("Viewer veza je prekinuta — nastavljam isti Google posao…");
-          }
-        } finally {
-          if (activeViewerController === viewerController) {
-            activeViewerController = null;
-          }
-        }
-      }
-
-      assertActiveJobOwnership(localJobId);
-      if (getActivePendingJob()?.cancelRequested) continue;
-
-      let canonical;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      throwIfUserStopped(signal);
       try {
-        assertActiveJobOwnership(localJobId);
-        canonical = await getStoredInteraction(interactionId, profile.key);
-        assertActiveJobOwnership(localJobId);
+        return await requestInteractionOnce(
+          text, img, key, model, profileId, signal
+        );
       } catch (err) {
-        if (err?.name === "LeaseLostError") throw err;
-        assertActiveJobOwnership(localJobId);
-        const definite = Number(err?.status || 0);
-        if ([401, 403, 404].includes(definite)) throw err;
-        checkpointActivePendingJob({
-          stage: "in_progress",
-          lastFailureReason: err?.message || String(err)
-        }, true);
-        setStatus("Google i dalje rešava u pozadini — ponovo povezujem isti ID…");
-        await waitForReconnect(1600);
-        continue;
+        if (isUserStopError(err, signal)) {
+          throw new UserStopError();
+        }
+        lastErr = err;
+
+        // Ako je samo stari previous_interaction_id istekao,
+        // očisti ga i probaj ponovo kao novi turn.
+        if (isStalePreviousInteractionError(err)) {
+          previousInteractionId = "";
+          previousInteractionProfileId = "";
+          continue;
+        }
+
+        if (
+          attempt === 0 &&
+          isRetriableDemandError(err)
+        ) {
+          await sleep(1200, signal);
+          continue;
+        }
+
+        throw err;
       }
-
-      assertActiveJobOwnership(localJobId);
-      applyCanonicalInteraction(canonical);
-      if (isInteractionTerminal(canonical.status)) return canonical;
-
-      checkpointActivePendingJob({ stage: "in_progress" }, true);
-      setStatus(`Google API ${profile.slot} rešava u pozadini…`);
-      await waitForReconnect(700);
     }
+
+    throw lastErr || new Error("Gemini fallback nije uspeo.");
+  }
+
+  async function runInteractionWithRecovery(
+    text,
+    img,
+    key,
+    model,
+    profileId,
+    signal
+  ) {
+    let usePreviousId = Boolean(
+      previousInteractionId &&
+      previousInteractionProfileId === profileId
+    );
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      throwIfUserStopped(signal);
+      try {
+        const body =
+          buildInteractionRequest(
+            text,
+            img,
+            model,
+            usePreviousId
+          );
+
+        return await streamInteraction(body, key, signal);
+      } catch (err) {
+        if (isUserStopError(err, signal)) {
+          throw new UserStopError();
+        }
+        // Ako je stari server-side chat istekao, nastavi iz lokalne istorije.
+        if (
+          usePreviousId &&
+          isStalePreviousInteractionError(err)
+        ) {
+          previousInteractionId = "";
+          previousInteractionProfileId = "";
+          usePreviousId = false;
+
+          resetLiveModelForRetry(
+            "Obnavljam kontekst razgovora…"
+          );
+          setStatus("Obnavljam stari chat…");
+          continue;
+        }
+
+        // Zadržavamo mali retry unutar ISTOG slota za prolazne serverske greške.
+        // Ako ni to ne uspe, send() prelazi na sledeći Google slot.
+        if (
+          attempt < 2 &&
+          isRetriableDemandError(err) &&
+          !hasVisibleLiveOutput()
+        ) {
+          const wait = attempt === 0 ? 700 : 1400;
+
+          setStatus(
+            `Google API je privremeno zauzet — pokušavam još jednom…`
+          );
+
+          resetLiveModelForRetry("Ponovni pokušaj…");
+          await sleep(wait, signal);
+          continue;
+        }
+
+        throw err;
+      }
+    }
+
+    throw new Error(
+      "Google API nije uspeo posle ponovnih pokušaja."
+    );
   }
 
   function isErrorHistoryMessage(message) {
@@ -6939,773 +6080,11 @@ window.MathJax = {
     }
   }
 
-  function configuredProfileForJob(job) {
-    const profile = getConfiguredGoogleProfiles().find(profile =>
-      profile.slot === Number(job?.slot || 0)
-    ) || null;
-    if (!profile) return null;
-
-    // Interaction mora da se nastavi istim ključem kojim je napravljen. Sam
-    // ključ se nikada ne kopira u job; čuva se samo kratki lokalni fingerprint.
-    if (
-      job?.keyFingerprint &&
-      apiKeyFingerprint(profile.key) !== job.keyFingerprint
-    ) {
-      return null;
-    }
-    return profile;
-  }
-
-  function nextConfiguredProfile(slot) {
-    return getConfiguredGoogleProfiles()
-      .filter(profile => profile.slot > Number(slot || 0))
-      .sort((a, b) => a.slot - b.slot)[0] || null;
-  }
-
-  function setSolveBusyUi(active) {
-    busy = active;
-    sendBtn.disabled = active;
-    el("pickImage").disabled = active;
-    el("newChat").disabled = active;
-    if (active) beginSolveControl();
-  }
-
-  function markCompletedInteraction(interactionId, profileId) {
-    previousInteractionId = interactionId || "";
-    previousInteractionProfileId = previousInteractionId ? profileId : "";
-    const chat = getActiveChat();
-    if (chat) {
-      chat.interactionId = previousInteractionId;
-      chat.interactionProfileId = previousInteractionProfileId;
-    }
-  }
-
-  function finalizeStoppedJob() {
-    if (liveModel) {
-      finishLiveModel({
-        completionState: "stopped",
-        emptyAnswer: "⏹ Odgovor je zaustavljen pre početka završnog teksta."
-      });
-    } else {
-      clearActivePendingJob();
-      saveHistory();
-    }
-    setStatus("Zaustavljeno. Sve što je stiglo ostalo je sačuvano.");
-    return "stopped";
-  }
-
-  function finalizeInterruptedJob(message, statusText = "Rešavanje je prekinuto.") {
-    const hadPartial = hasVisibleLiveOutput();
-    if (liveModel) {
-      finishLiveModel({
-        completionState: "interrupted",
-        emptyAnswer: "⚠ Odgovor nije mogao da se završi:\n\n" + message
-      });
-    } else {
-      const turnId = getActivePendingJob()?.localJobId || "";
-      clearActivePendingJob();
-      history.push({
-        role: "model",
-        text: "⚠ Odgovor nije mogao da se završi:\n\n" + message,
-        completionState: "interrupted",
-        clientTurnId: turnId,
-        timestamp: Date.now()
-      });
-      saveHistory();
-      render();
-    }
-    setStatus(hadPartial ? "Sačuvan je prikazani deo odgovora." : statusText, true);
-    return "interrupted";
-  }
-
-  async function runPendingSolveJob({ allowCreate, runtimeImage = null }) {
-    while (true) {
-      let job = getActivePendingJob();
-      if (!job) return "completed_elsewhere";
-      assertActiveJobOwnership(job.localJobId);
-
-      if (["outcome_unknown", "interaction_missing", "quarantined"].includes(job.stage)) {
-        return job.stage;
-      }
-
-      if (!job.interactionId && !allowCreate) {
-        throw new CreateOutcomeUnknownError(
-          "Stranica je zatvorena dok je create zahtev bio u toku, pre nego što je " +
-          "interaction ID trajno sačuvan. Bez dokumentovanog idempotency ključa " +
-          "aplikacija neće rizikovati dupli posao."
-        );
-      }
-
-      const profile = configuredProfileForJob(job);
-      if (!profile) {
-        waitingForInitialApiKey = true;
-        openKeyDialog();
-        const credentialsError = new PendingCredentialsError(
-          `Nedostaje API ključ ${job.slot} potreban za isti background posao.`
-        );
-        credentialsError.beforeCreate = !job.interactionId;
-        throw credentialsError;
-      }
-
-      const profileId = googleProfileId(profile);
-
-      if (!job.interactionId) {
-        if (job.cancelRequested) return finalizeStoppedJob();
-
-        const requestImage = await imageForPendingJob(job, runtimeImage);
-        assertActiveJobOwnership(job.localJobId);
-        job = getActivePendingJob();
-        if (!job || job.localJobId !== activeJobLeaseId) {
-          markJobOwnershipLost("Pending posao je promenjen pre create zahteva.");
-          throw new LeaseLostError();
-        }
-        if (job.cancelRequested) return finalizeStoppedJob();
-
-        // waiting_create_credentials znači da prethodni POST sigurno nije ni
-        // poslat. Pre dispatch-a ga vraćamo u creating i čuvamo attempt fence.
-        if (job.stage === "waiting_create_credentials") {
-          job = setActivePendingJob({
-            ...job,
-            stage: "creating",
-            lastFailureReason: ""
-          }, false);
-          if (!job) throw new Error("Create checkpoint nije lokalno sačuvan.");
-        }
-
-        const usePreviousId = Boolean(
-          previousInteractionId &&
-          previousInteractionProfileId === profileId
-        );
-        const body = buildInteractionRequest(
-          job.requestText,
-          requestImage,
-          profile.model,
-          usePreviousId,
-          job.localJobId
-        );
-
-        setStatus(`Google API ${profile.slot} · pokrećem background rešavanje…`);
-
-        let created;
-        try {
-          assertActiveJobOwnership(job.localJobId);
-          // Nema AbortSignal-a: Stop tokom create-a čeka ID, pa zatim šalje /cancel.
-          created = await createBackgroundInteraction(body, profile.key);
-          assertActiveJobOwnership(job.localJobId);
-        } catch (err) {
-          if (err?.name === "LeaseLostError") throw err;
-          assertActiveJobOwnership(job.localJobId);
-          const freshJob = getActivePendingJob();
-          if (!freshJob || freshJob.localJobId !== job.localJobId) {
-            markJobOwnershipLost("Pending posao je promenjen tokom create zahteva.");
-            throw new LeaseLostError();
-          }
-          if (
-            err?.safeCreateFallback &&
-            freshJob.cancelRequested
-          ) {
-            return finalizeStoppedJob();
-          }
-
-          const next = nextConfiguredProfile(profile.slot);
-          const safeFallback = Boolean(
-            err?.safeCreateFallback &&
-            next &&
-            !hasVisibleLiveOutput() &&
-            !freshJob.cancelRequested &&
-            isEligibleProfileFallbackError(err)
-          );
-
-          if (!safeFallback) throw err;
-
-          const reason = profileFallbackReason(err);
-          setStatus(
-            `API ${profile.slot}: ${reason} — prelazim na API ${next.slot}…`
-          );
-          resetLiveModelForRetry(`Prelazim na Google API ${next.slot}…`);
-          const moved = setActivePendingJob({
-            ...freshJob,
-            stage: "creating",
-            interactionId: "",
-            createAttemptId: makeChatId(),
-            slot: next.slot,
-            profileId: googleProfileId(next),
-            model: DEFAULT_MODEL,
-            keyFingerprint: apiKeyFingerprint(next.key),
-            lastEventId: "",
-            pollOnly: false,
-            stepTypes: {},
-            thinking: "",
-            answer: "",
-            thinkingMs: 0,
-            lastFailureReason: err?.message || String(err)
-          }, false);
-          if (!moved) {
-            throw new Error("Fallback nije pokrenut jer lokalni checkpoint nije uspeo.");
-          }
-          allowCreate = true;
-          continue;
-        }
-
-        // Najvažniji atomic checkpoint: interaction ID se čuva pre prvog GET/SSE.
-        assertActiveJobOwnership(job.localJobId);
-        const freshAfterCreate = getActivePendingJob();
-        if (
-          !freshAfterCreate ||
-          freshAfterCreate.localJobId !== job.localJobId ||
-          freshAfterCreate.createAttemptId !== job.createAttemptId
-        ) {
-          markJobOwnershipLost("Create odgovor pripada zastarelom attempt fence-u.");
-          throw new LeaseLostError();
-        }
-        const persisted = setActivePendingJob({
-          ...freshAfterCreate,
-          stage: freshAfterCreate.cancelRequested ? "cancelling" : "in_progress",
-          interactionId: String(created.id),
-          profileId,
-          model: DEFAULT_MODEL,
-          keyFingerprint: apiKeyFingerprint(profile.key),
-          cancelRequested: !!freshAfterCreate.cancelRequested,
-          lastFailureReason: ""
-        }, false);
-        if (!persisted) {
-          // Posao već postoji; ostajemo na istom ID-u u ovoj sesiji i jasno
-          // prijavljujemo da automatski reload recovery nije garantovan.
-          console.error("[Interaction ID nije trajno sačuvan]", created.id);
-        }
-        allowCreate = false;
-        job = getActivePendingJob();
-      }
-
-      assertActiveJobOwnership(job.localJobId);
-      const terminal = await monitorStoredInteraction(job, profile);
-      assertActiveJobOwnership(job.localJobId);
-      applyCanonicalInteraction(terminal);
-      const terminalStatus = String(terminal?.status || "");
-
-      if (terminalStatus === "completed") {
-        if (!extractInteractionOutputText(terminal)) {
-          throw new Error(
-            "Google je označio posao kao completed, ali canonical GET nema model_output tekst."
-          );
-        }
-        assertActiveJobOwnership(job.localJobId);
-        // Posao započet pre promene fiksnog modela i dalje sme da se dovrši
-        // preko istog ID-a/ključa, ali njegov 3.6 kontekst ne sme da se lažno
-        // označi kao 3.7 i prosledi sledećem turn-u. Tada koristimo lokalni
-        // stateless kontekst umesto cross-model previous_interaction_id veze.
-        const reusableProfileId = job.profileId === profileId ? profileId : "";
-        markCompletedInteraction(
-          terminal.id || job.interactionId,
-          reusableProfileId
-        );
-        const solvedChatId = activeChatId;
-        finishLiveModel();
-        maybeGenerateChatTitle(solvedChatId);
-        setStatus(
-          profile.slot === 1
-            ? ""
-            : `Rešeno preko Google API ${profile.slot} · ${profile.model}`
-        );
-        return "completed";
-      }
-
-      if (terminalStatus === "cancelled") {
-        return finalizeStoppedJob();
-      }
-
-      if (terminalStatus === "requires_action") {
-        return finalizeInterruptedJob(
-          "Google je vratio requires_action. Ova aplikacija nema bezbedan korisnički " +
-          "tool-callback korak, pa se isti posao neće vrteti u krug.",
-          "Potrebna je dodatna radnja modela."
-        );
-      }
-
-      const terminalError = terminalInteractionError(terminal);
-      const next = nextConfiguredProfile(profile.slot);
-      const canFallback = Boolean(
-        next &&
-        !hasVisibleLiveOutput() &&
-        !getActivePendingJob()?.cancelRequested &&
-        isEligibleTerminalFallback(terminal, terminalError)
-      );
-
-      if (!canFallback) throw terminalError;
-
-      // Posle reload-a sliku vraćamo iz IndexedDB; nikada ne pravimo fallback
-      // koji bi slučajno izostavio sliku originalnog zadatka.
-      runtimeImage = await imageForPendingJob(job, runtimeImage);
-      assertActiveJobOwnership(job.localJobId);
-      const freshBeforeFallback = getActivePendingJob();
-      if (
-        !freshBeforeFallback ||
-        freshBeforeFallback.localJobId !== job.localJobId ||
-        freshBeforeFallback.interactionId !== job.interactionId
-      ) {
-        markJobOwnershipLost("Terminalni fallback je izgubio pending fence.");
-        throw new LeaseLostError();
-      }
-      if (freshBeforeFallback.cancelRequested) return finalizeStoppedJob();
-
-      setStatus(
-        `API ${profile.slot}: ${profileFallbackReason(terminalError)} — ` +
-        `terminalni neuspeh, prelazim na API ${next.slot}…`
-      );
-      resetLiveModelForRetry(`Prelazim na Google API ${next.slot}…`);
-      const moved = setActivePendingJob({
-        ...freshBeforeFallback,
-        stage: "creating",
-        interactionId: "",
-        createAttemptId: makeChatId(),
-        slot: next.slot,
-        profileId: googleProfileId(next),
-        keyFingerprint: apiKeyFingerprint(next.key),
-        lastEventId: "",
-        pollOnly: false,
-        stepTypes: {},
-        thinking: "",
-        answer: "",
-        thinkingMs: 0,
-        lastFailureReason: terminalError.message
-      }, false);
-      if (!moved) throw new Error("Terminalni fallback nije lokalno sačuvan.");
-      allowCreate = true;
-    }
-  }
-
-  function launchPendingJobRunner({
-    allowCreate = false,
-    runtimeImage = null,
-    ownershipAlreadyClaimed = false
-  } = {}) {
-    if (activeJobRunPromise) return activeJobRunPromise;
-    const initialJob = getActivePendingJob();
-    if (!initialJob) return null;
-
-    let outcome = "interrupted";
-    let claimedByRunner = ownershipAlreadyClaimed;
-    let didStartUi = false;
-
-    const runnerPromise = (async () => {
-      // Omogući da activeJobRunPromise dobije baš ovaj promise pre bilo kog
-      // catch/finally puta (uključujući trenutni fence failure).
-      await Promise.resolve();
-      try {
-        if (ownershipAlreadyClaimed) {
-          assertActiveJobOwnership(initialJob.localJobId);
-        } else {
-          claimedByRunner = await claimGlobalJobOwnership(
-            initialJob.localJobId,
-            { allowSameJob: true, targetChatId: activeChatId }
-          );
-          if (!claimedByRunner) {
-            outcome = "ownership_elsewhere";
-            pauseLiveModelForUnresolved("prati drugi tab");
-            setStatus(
-              lastJobOwnershipError ||
-                "Isti zadatak se već prati u drugom tabu. Ne pravim dupli zahtev.",
-              !localPersistenceHealthy
-            );
-            if (!pendingLeaseRetryTimer) {
-              pendingLeaseRetryTimer = setTimeout(() => {
-                pendingLeaseRetryTimer = null;
-                void resumePendingSolveIfNeeded();
-              }, 2500);
-            }
-            return outcome;
-          }
-        }
-
-        assertActiveJobOwnership(initialJob.localJobId);
-        hideUnresolvedJobActions();
-        if (!busy) setSolveBusyUi(true);
-        didStartUi = true;
-        if (!liveModel) createLiveModelMessage(getActivePendingJob() || initialJob);
-        userStopRequested = !!getActivePendingJob()?.cancelRequested;
-        if (userStopRequested) {
-          stopGenerationBtn.textContent = "Zaustavljam…";
-          stopGenerationBtn.disabled = true;
-        }
-
-        outcome = await runPendingSolveJob({ allowCreate, runtimeImage });
-        if (["outcome_unknown", "interaction_missing", "quarantined"].includes(outcome)) {
-          const unresolved = getActivePendingJob();
-          if (unresolved) showUnresolvedJobActions(unresolved);
-        }
-      } catch (err) {
-        const current = getActivePendingJob();
-        if (err?.name === "LeaseLostError" || activeJobLeaseLost) {
-          outcome = "ownership_lost";
-          setStatus(
-            "Ovaj tab je izgubio vlasništvo nad prikazivačem. Ne šalje niti upisuje ništa dalje."
-          );
-        } else if (err?.name === "CreateOutcomeUnknownError") {
-          outcome = preserveOutcomeUnknown(err);
-        } else if (err?.name === "PendingCredentialsError") {
-          if (current?.interactionId) {
-            outcome = preserveRecoverableKnownInteraction(
-              "waiting_credentials",
-              err
-            );
-          } else {
-            const waiting = checkpointActivePendingJob({
-              stage: "waiting_create_credentials",
-              lastFailureReason: err?.message || String(err)
-            }, true);
-            if (waiting) showUnresolvedJobActions(waiting);
-            waitingForInitialApiKey = true;
-            openKeyDialog();
-            setStatus(
-              "Create još nije poslat. Unesi isti API ključ da bi se bezbedno pokrenuo.",
-              true
-            );
-            outcome = waiting ? "waiting_key" : "ownership_lost";
-          }
-        } else if (
-          current?.interactionId &&
-          [401, 403].includes(Number(err?.status || 0))
-        ) {
-          outcome = preserveRecoverableKnownInteraction(
-            "waiting_credentials",
-            err
-          );
-        } else if (
-          current?.interactionId &&
-          Number(err?.status || 0) === 404
-        ) {
-          outcome = preserveRecoverableKnownInteraction(
-            "interaction_missing",
-            err
-          );
-        } else {
-          outcome = finalizeInterruptedJob(err?.message || String(err));
-        }
-      } finally {
-        const lostOwnership = activeJobLeaseLost || outcome === "ownership_lost";
-        if (claimedByRunner) releaseJobLease();
-        if (activeJobRunPromise === runnerPromise) activeJobRunPromise = null;
-
-        if (didStartUi) {
-          busy = false;
-          sendBtn.disabled = false;
-          el("pickImage").disabled = false;
-          el("newChat").disabled = false;
-          finishSolveControl(
-            outcome === "completed"
-              ? "✓ Gotovo"
-              : outcome === "stopped"
-                ? "Zaustavljeno"
-                : outcome === "waiting_key"
-                  ? "Čeka ključ"
-                  : outcome === "outcome_unknown"
-                    ? "Ishod nepoznat"
-                    : outcome === "ownership_lost"
-                      ? "Nastavlja drugi tab"
-                      : "Prekinuto"
-          );
-          scrollBottom(true);
-        }
-
-        if (lostOwnership && document.visibilityState === "visible") {
-          setTimeout(() => {
-            if (!activeJobRunPromise) void resumePendingSolveIfNeeded();
-          }, 0);
-        }
-      }
-      return outcome;
-    })();
-
-    activeJobRunPromise = runnerPromise;
-    return runnerPromise;
-  }
-
-  function resumePendingSolveIfNeeded() {
-    if (activeJobRunPromise) return activeJobRunPromise;
-
-    const freshChats = loadChats();
-    const pendingChats = findAllPendingChats(freshChats);
-    if (!pendingChats.length) {
-      hideUnresolvedJobActions();
-      return null;
-    }
-
-    closeSourceSheet();
-    chats = freshChats;
-    const chat = findMostRecentPendingChat(chats);
-    activeChatId = chat.id;
-    activeChatPersisted = true;
-    history = safeMessages(chat.messages);
-    previousInteractionId = chat.interactionId || "";
-    previousInteractionProfileId = chat.interactionProfileId || "";
-    liveModel = null;
-    render();
-    renderHistoryList();
-
-    const job = safePendingJob(chat.pendingJob);
-    if (!job) return null;
-    if (!liveModel) createLiveModelMessage(job);
-
-    if (pendingChats.length > 1) {
-      showUnresolvedJobActions(job);
-      setStatus(
-        "Postoji više sačuvanih pending poslova. Nijedan zahtev nije automatski nastavljen.",
-        true
-      );
-      return null;
-    }
-
-    if (["outcome_unknown", "interaction_missing", "quarantined"].includes(job.stage)) {
-      showUnresolvedJobActions(job);
-      return null;
-    }
-
-    if (job.stage === "waiting_create_credentials") {
-      if (!configuredProfileForJob(job)) {
-        showUnresolvedJobActions(job);
-        waitingForInitialApiKey = true;
-        openKeyDialog();
-        setStatus("Create nije poslat; čeka se originalni API ključ.", true);
-        return null;
-      }
-      setStatus("API ključ je vraćen — pokrećem jedini sačuvani create attempt…");
-      return launchPendingJobRunner({ allowCreate: true });
-    }
-
-    if (job.stage === "waiting_credentials" && !configuredProfileForJob(job)) {
-      showUnresolvedJobActions(job);
-      waitingForInitialApiKey = true;
-      openKeyDialog();
-      setStatus(
-        `Za isti Interaction ID potreban je originalni API ključ ${job.slot}.`,
-        true
-      );
-      return null;
-    }
-
-    setStatus(
-      job.cancelRequested
-        ? "Obnavljam isti posao i prvo potvrđujem Stop…"
-        : "Obnavljam isti background posao…"
-    );
-    return launchPendingJobRunner({ allowCreate: false });
-  }
-
-  async function retryUnresolvedJobExplicitly() {
-    if (busy || activeJobRunPromise) return;
-
-    const freshChats = loadChats();
-    const pendingChats = findAllPendingChats(freshChats);
-    if (pendingChats.length !== 1) {
-      setStatus(
-        "Ponovno slanje je blokirano dok postoji više od jednog pending zapisa.",
-        true
-      );
-      return;
-    }
-
-    const chat = pendingChats[0];
-    const job = safePendingJob(chat.pendingJob);
-    const retryableStages = [
-      "outcome_unknown",
-      "interaction_missing",
-      "waiting_create_credentials"
-    ];
-    if (!job || !retryableStages.includes(job.stage)) {
-      setStatus("Ovaj zapis nema bezbednu opciju ponovnog slanja.", true);
-      return;
-    }
-
-    const warning = job.stage === "waiting_create_credentials"
-      ? "Prethodni Google POST sigurno nije poslat. Da li želiš da ovaj sačuvani zadatak vežeš za trenutni API ključ i pokreneš ga sada?"
-      : job.stage === "outcome_unknown"
-        ? "Google je možda već prihvatio prethodni zahtev. Novi pokušaj može napraviti duplikat ili dodatnu potrošnju. Da li ipak želiš da pošalješ NOVI zahtev?"
-        : "Sačuvani Interaction ID trenutno vraća 404. Novi pokušaj može duplirati posao ako je nedostupnost samo privremena. Da li ipak želiš NOVI zahtev?";
-    if (!confirm(warning)) return;
-
-    const profile = getConfiguredGoogleProfiles().find(item =>
-      item.slot === Number(job.slot || 0)
-    );
-    if (!profile) {
-      waitingForInitialApiKey = true;
-      openKeyDialog();
-      setStatus(`Unesi API ključ ${job.slot} pre eksplicitnog pokušaja.`, true);
-      return;
-    }
-
-    const claimed = await claimGlobalJobOwnership(
-      job.localJobId,
-      { allowSameJob: true, targetChatId: chat.id }
-    );
-    if (!claimed) {
-      setStatus(
-        lastJobOwnershipError ||
-          "Drugi tab je preuzeo ovaj zapis; novi zahtev nije poslat.",
-        true
-      );
-      return;
-    }
-
-    try {
-      assertActiveJobOwnership(job.localJobId);
-      chats = loadChats();
-      const currentChat = chats.find(item => item.id === chat.id);
-      const current = safePendingJob(currentChat?.pendingJob);
-      if (
-        !current ||
-        current.localJobId !== job.localJobId ||
-        !retryableStages.includes(current.stage)
-      ) {
-        markJobOwnershipLost("Unresolved zapis je promenjen pre potvrđenog retry-a.");
-        throw new LeaseLostError();
-      }
-
-      activeChatId = currentChat.id;
-      activeChatPersisted = true;
-      history = safeMessages(currentChat.messages);
-      previousInteractionId = currentChat.interactionId || "";
-      previousInteractionProfileId = currentChat.interactionProfileId || "";
-      const retried = setActivePendingJob({
-        ...current,
-        stage: "creating",
-        interactionId: "",
-        createAttemptId: makeChatId(),
-        profileId: googleProfileId(profile),
-        model: DEFAULT_MODEL,
-        keyFingerprint: apiKeyFingerprint(profile.key),
-        lastEventId: "",
-        cancelRequested: false,
-        pollOnly: false,
-        stepTypes: {},
-        thinking: "",
-        answer: "",
-        thinkingMs: 0,
-        lastFailureReason: current.stage === "waiting_create_credentials"
-          ? "Korisnik je eksplicitno vezao pre-dispatch posao za trenutni ključ."
-          : "Korisnik je eksplicitno potvrdio novi create pokušaj."
-      }, false);
-      if (!retried) throw new Error("Potvrđeni retry nije lokalno sačuvan.");
-
-      hideUnresolvedJobActions();
-      liveModel = null;
-      render();
-      createLiveModelMessage(retried);
-      await launchPendingJobRunner({
-        allowCreate: true,
-        ownershipAlreadyClaimed: true
-      });
-    } catch (err) {
-      if (!activeJobRunPromise) {
-        if (err?.name === "LeaseLostError") {
-          setStatus("Retry je zaustavljen zbog promene vlasništva; ništa nije poslato.", true);
-        } else {
-          setStatus(err?.message || String(err), true);
-        }
-        releaseJobLease();
-      }
-    }
-  }
-
-  async function discardUnresolvedJobExplicitly() {
-    if (busy || activeJobRunPromise) return;
-    const freshChats = loadChats();
-    const target =
-      freshChats.find(item => item.id === activeChatId && safePendingJob(item.pendingJob)) ||
-      findMostRecentPendingChat(freshChats);
-    const job = safePendingJob(target?.pendingJob);
-    if (!target || !job) return;
-
-    const discardWarning = job.interactionId
-      ? "Odbaciti lokalno praćenje sačuvanog Interaction ID-a? Bez originalnog ključa aplikacija ne može poslati server-side cancel; Google posao možda i dalje postoji. Prikazani delovi će ostati u istoriji."
-      : "Odbaciti lokalni pending zapis? Bez važećeg Interaction ID-a server-side ishod ili cancel nije moguće potvrditi. Prikazani delovi će ostati u istoriji.";
-    if (!confirm(discardWarning)) {
-      return;
-    }
-
-    const resolutionLeaseId = job.localJobId || `resolution:${target.id}`;
-    const claimed = await claimGlobalJobOwnership(
-      resolutionLeaseId,
-      {
-        allowSameJob: true,
-        allowMultipleForResolution: true,
-        targetChatId: target.id
-      }
-    );
-    if (!claimed) {
-      setStatus(
-        lastJobOwnershipError ||
-          "Drugi tab trenutno menja pending zapis; odbacivanje nije upisano.",
-        true
-      );
-      return;
-    }
-
-    try {
-      assertActiveJobOwnership(resolutionLeaseId);
-      const latestChats = loadChats();
-      const latestTarget = latestChats.find(item => item.id === target.id);
-      const latestJob = safePendingJob(latestTarget?.pendingJob);
-      if (
-        !latestTarget ||
-        !latestJob ||
-        (job.localJobId && latestJob.localJobId !== job.localJobId)
-      ) {
-        throw new LeaseLostError("Pending zapis je već promenjen u drugom tabu.");
-      }
-
-      const turnId = latestJob.localJobId || `quarantine:${target.id}`;
-      const finalMessage = {
-        role: "model",
-        text: latestJob.answer ||
-          "⚠ Pending zapis je eksplicitno odbačen bez potvrđenog konačnog Google ishoda.",
-        thinking: latestJob.thinking || "",
-        thinkingMs: latestJob.thinkingMs || 0,
-        totalMs: Math.max(0, Date.now() - latestJob.createdAt),
-        completionState: "interrupted",
-        clientTurnId: turnId,
-        timestamp: Date.now()
-      };
-      const existing = latestTarget.messages.findIndex(message =>
-        message?.role === "model" && message?.clientTurnId === turnId
-      );
-      if (existing >= 0) latestTarget.messages[existing] = finalMessage;
-      else latestTarget.messages.push(finalMessage);
-      latestTarget.pendingJob = null;
-      latestTarget.updatedAt = Date.now();
-
-      assertActiveJobOwnership(resolutionLeaseId);
-      localStorage.setItem(CHATS_STORAGE, JSON.stringify(latestChats));
-      chats = latestChats;
-      hideUnresolvedJobActions();
-      liveModel = null;
-      setStatus("Pending zapis je odbačen; sačuvani delovi su ostali u istoriji.");
-    } catch (err) {
-      if (err?.name !== "LeaseLostError") localPersistenceHealthy = false;
-      setStatus(err?.message || "Odbacivanje nije lokalno sačuvano.", true);
-    } finally {
-      releaseJobLease();
-    }
-
-    void resumePendingSolveIfNeeded();
-    if (!findAllPendingChats(loadChats()).length) {
-      const saved = chats.find(item => item.id === target.id);
-      if (saved) {
-        activeChatId = saved.id;
-        activeChatPersisted = true;
-        history = safeMessages(saved.messages);
-        previousInteractionId = saved.interactionId || "";
-        previousInteractionProfileId = saved.interactionProfileId || "";
-        render();
-        renderHistoryList();
-      }
-    }
-  }
-
   async function send() {
-    if (focusGlobalPendingJob()) return;
     if (busy) return;
 
     const profiles = getConfiguredGoogleProfiles();
+
     if (!profiles.length) {
       waitingForInitialApiKey = true;
       openKeyDialog();
@@ -7714,165 +6093,318 @@ window.MathJax = {
 
     const typedText = promptEl.value.trim();
     const img = selectedImage;
+
     if (!typedText && !img) return;
 
-    // Zaključavanje je pre IndexedDB await-a da brzi dvostruki tap ne napravi
-    // dva client turn-a / dva background create zahteva.
-    setSolveBusyUi(true);
-    const clientTurnId = makeChatId();
-    const createdAt = Date.now();
-    const finalText = typedText || DEFAULT_IMAGE_PROMPT;
-    let ownsLease = false;
-    let ownershipTransferredToRunner = false;
+    const finalText =
+      typedText || DEFAULT_IMAGE_PROMPT;
 
-    try {
-      ownsLease = await claimGlobalJobOwnership(
-        clientTurnId,
-        { allowSameJob: false, targetChatId: activeChatId }
-      );
-      if (userStopRequested) {
-        const stoppedBeforeClaim = new Error(
-          "Zaustavljeno pre slanja Google create zahteva."
-        );
-        stoppedBeforeClaim.name = "UserStopBeforeCreateError";
-        throw stoppedBeforeClaim;
-      }
-      if (!ownsLease) {
-        throw new Error(
-          lastJobOwnershipError ||
-            "Drugi tab trenutno zaključava rešavanje; zahtev nije poslat."
-        );
-      }
-      assertActiveJobOwnership(clientTurnId);
+    let imageId = "";
 
-      let imageId = "";
-      if (img) {
-        setStatus("Trajno čuvam sliku pre pokretanja…");
-        imageId = makeImageId();
-        let imageBlob = img.blob || null;
+    if (img) {
+      imageId = makeImageId();
 
-        if (!imageBlob && img.data && img.mimeType) {
+      let imageBlob = img.blob || null;
+
+      // Rezervna konverzija ako browser iz nekog razloga nije sačuvao blob.
+      if (!imageBlob && img.data && img.mimeType) {
+        try {
           const binary = atob(img.data);
           const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-          imageBlob = new Blob([bytes], { type: img.mimeType });
-        }
 
-        if (!await saveChatImage(imageId, imageBlob)) {
-          throw new Error(
-            "Slika nije trajno sačuvana. Background posao nije pokrenut, " +
-            "jer posle reload-a ne bi bilo bezbednog image fallback-a."
+          for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+          }
+
+          imageBlob = new Blob(
+            [bytes],
+            { type: img.mimeType }
+          );
+        } catch {}
+      }
+
+      const saved =
+        await saveChatImage(
+          imageId,
+          imageBlob
+        );
+
+      if (!saved) {
+        // Thumbnail će i dalje raditi u trenutnoj sesiji preko previewUrl-a.
+        // Ne upisujemo lažni imageId ako trajno čuvanje nije uspelo.
+        imageId = "";
+      }
+    }
+
+    // User poruka u UI + lokalnoj istoriji.
+    history.push({
+      role: "user",
+      text: finalText,
+      hadImage: !!img,
+      imageId,
+      previewUrl: img?.previewUrl || null,
+      apiImage: cloneApiImage(img),
+      timestamp: Date.now()
+    });
+    saveHistory();
+
+    promptEl.value = "";
+    autoGrow();
+
+    selectedImage = null;
+    cameraInput.value = "";
+    galleryInput.value = "";
+    previewWrap.classList.remove("show");
+
+    busy = true;
+    sendBtn.disabled = true;
+    el("pickImage").disabled = true;
+    el("newChat").disabled = true;
+    const solveSignal = beginSolveControl();
+    let solveOutcome = "interrupted";
+
+    render();
+    createLiveModelMessage();
+
+    const failures = [];
+    let solved = false;
+
+    try {
+      for (let index = 0; index < profiles.length; index++) {
+        const profile = profiles[index];
+        const profileId = googleProfileId(profile);
+
+        if (index > 0) {
+          resetLiveModelForRetry(
+            `Prelazim na Google API ${profile.slot}…`
           );
         }
-        assertActiveJobOwnership(clientTurnId);
-      }
 
-      if (userStopRequested) {
-        const stoppedBeforeCreate = new Error(
-          "Zaustavljeno pre slanja Google create zahteva."
+        setStatus(
+          `Google API ${profile.slot} · ${profile.model}…`
         );
-        stoppedBeforeCreate.name = "UserStopBeforeCreateError";
-        throw stoppedBeforeCreate;
-      }
 
-      history.push({
-        role: "user",
-        text: finalText,
-        hadImage: !!img,
-        imageId,
-        previewUrl: img?.previewUrl || null,
-        apiImage: cloneApiImage(img),
-        clientTurnId,
-        timestamp: createdAt
-      });
-      if (!saveHistory()) {
-        throw new Error(
-          "Poruka nije mogla lokalno da se sačuva. Google zahtev nije poslat."
-        );
-      }
+        try {
+          let result =
+            await runInteractionWithRecovery(
+              typedText,
+              img,
+              profile.key,
+              profile.model,
+              profileId,
+              solveSignal
+            );
 
-      const firstProfile = profiles[0];
-      const pendingJob = setActivePendingJob({
-        version: 1,
-        localJobId: clientTurnId,
-        createAttemptId: clientTurnId,
-        stage: "creating",
-        interactionId: "",
-        slot: firstProfile.slot,
-        profileId: googleProfileId(firstProfile),
-        model: DEFAULT_MODEL,
-        keyFingerprint: apiKeyFingerprint(firstProfile.key),
-        lastEventId: "",
-        requestText: finalText,
-        imageId,
-        imageMimeType: img?.mimeType || "image/jpeg",
-        hadImage: !!img,
-        thinking: "",
-        answer: "",
-        thinkingMs: 0,
-        createdAt,
-        updatedAt: Date.now(),
-        cancelRequested: false,
-        pollOnly: false,
-        stepTypes: {},
-        lastFailureReason: ""
-      });
-      if (!pendingJob) {
-        throw new Error(
-          "Background checkpoint nije mogao lokalno da se sačuva. Google zahtev nije poslat."
-        );
-      }
+          console.debug(
+            `[Google API ${profile.slot} stream]`,
+            profile.model,
+            result
+          );
 
-      promptEl.value = "";
-      autoGrow();
-      selectedImage = null;
-      cameraInput.value = "";
-      galleryInput.value = "";
-      previewWrap.classList.remove("show");
-
-      render();
-      createLiveModelMessage(pendingJob);
-      ownershipTransferredToRunner = true;
-      await launchPendingJobRunner({
-        allowCreate: true,
-        runtimeImage: img,
-        ownershipAlreadyClaimed: true
-      });
-    } catch (err) {
-      if (!ownershipTransferredToRunner && !activeJobRunPromise) {
-        if (ownsLease) {
-          const pending = getActivePendingJob();
+          // Ako browser proguta završni SSE event ili model_output,
+          // pokušaj isti slot jednom i kao običan JSON odgovor.
           if (
-            pending &&
-            err?.name !== "LeaseLostError" &&
-            hasActiveJobOwnership(clientTurnId)
+            !result.completed ||
+            result.completedStatus !== "completed" ||
+            !result.answerText
           ) {
-            finalizeInterruptedJob(err?.message || String(err));
-          } else {
+            if (hasVisibleLiveOutput()) {
+              throw new Error(
+                "Veza sa streamom je prekinuta nakon što je deo odgovora već prikazan."
+              );
+            }
+
             setStatus(
-              err?.name === "UserStopBeforeCreateError"
-                ? "Zaustavljeno. Google zahtev nije poslat."
-                : err?.message || String(err),
-              err?.name !== "UserStopBeforeCreateError"
+              `Google API ${profile.slot} · dovršavam odgovor…`
+            );
+
+            result =
+              await requestInteractionOnceWithRetry(
+                typedText,
+                img,
+                profile.key,
+                profile.model,
+                profileId,
+                solveSignal
+              );
+
+            console.debug(
+              `[Google API ${profile.slot} sync]`,
+              profile.model,
+              result
             );
           }
-          releaseJobLease();
-        } else {
-          setStatus(
-            err?.name === "UserStopBeforeCreateError"
-              ? "Zaustavljeno. Google zahtev nije poslat."
-              : err?.message || String(err),
-            err?.name !== "UserStopBeforeCreateError"
+
+          if (
+            !result.completed ||
+            result.completedStatus !== "completed"
+          ) {
+            throw new Error(
+              `Odgovor nije kompletan (${result.completedStatus || "nepoznat status"}).`
+            );
+          }
+
+          if (!result.answerText) {
+            throw new Error(
+              "Model je završio zahtev, ali nije vratio model_output tekst."
+            );
+          }
+
+          replaceLiveAnswer(result.answerText);
+
+          if (result.thoughtText) {
+            liveModel.thinking = result.thoughtText;
+            renderModelContent(
+              liveModel.thinkingRendered,
+              result.thoughtText,
+              true
+            );
+          }
+
+          if (result.interactionId) {
+            saveCurrentInteractionId(
+              result.interactionId,
+              profileId
+            );
+          } else {
+            // Bez server-side interaction id-a nastavljamo iz lokalne istorije.
+            previousInteractionId = "";
+            previousInteractionProfileId = "";
+          }
+
+          solved = true;
+          solveOutcome = "completed";
+
+          const solvedChatId = activeChatId;
+
+          finishLiveModel();
+
+          // Naslov se izvodi lokalno, bez skrivenog dodatnog Gemini zahteva.
+          maybeGenerateChatTitle(solvedChatId);
+
+          if (profile.slot === 1) {
+            setStatus("");
+          } else {
+            setStatus(
+              `Rešeno preko Google API ${profile.slot} · ${profile.model}`
+            );
+            setTimeout(() => {
+              if (!busy) setStatus("");
+            }, 1800);
+          }
+
+          break;
+        } catch (err) {
+          if (isUserStopError(err, solveSignal)) {
+            throw new UserStopError();
+          }
+
+          const msg =
+            err?.message || String(err);
+
+          failures.push(
+            `Google API ${profile.slot} (${profile.model}): ${msg}`
           );
+
+          console.warn(
+            `[Google API ${profile.slot} neuspeh]`,
+            profile.model,
+            err
+          );
+
+          const hasPartial = hasVisibleLiveOutput();
+          const canUseNextProfile =
+            !hasPartial &&
+            isEligibleProfileFallbackError(err);
+
+          if (!canUseNextProfile) {
+            throw err;
+          }
+
+          if (index < profiles.length - 1) {
+            const next = profiles[index + 1];
+            const reason = profileFallbackReason(err);
+            setStatus(
+              `API ${profile.slot}: ${reason} — prelazim na API ${next.slot}…`
+            );
+            await sleep(650, solveSignal);
+          }
         }
-        busy = false;
-        sendBtn.disabled = false;
-        el("pickImage").disabled = false;
-        el("newChat").disabled = false;
-        finishSolveControl(
-          err?.name === "UserStopBeforeCreateError" ? "Zaustavljeno" : "Prekinuto"
+      }
+
+      if (!solved) {
+        throw new Error(
+          "Nijedan podešeni Google API nije uspeo.\n\n" +
+          failures.join("\n\n")
         );
       }
+    } catch (err) {
+      const message =
+        err?.message || String(err);
+      const stopped = isUserStopError(err, solveSignal);
+
+      // Prekinuti turn nije bezbedno nastaviti preko starog server-side ID-a.
+      // Sledeća poruka će zato obnoviti kontekst iz lokalno sačuvane istorije.
+      saveCurrentInteractionId("", "");
+
+      if (stopped) {
+        solveOutcome = "stopped";
+
+        if (liveModel) {
+          finishLiveModel({
+            completionState: "stopped",
+            emptyAnswer: "⏹ Odgovor je zaustavljen pre početka završnog teksta."
+          });
+        }
+
+        setStatus("Zaustavljeno. Sve što je stiglo ostalo je sačuvano.");
+        setTimeout(() => {
+          if (!busy) setStatus("");
+        }, 1800);
+      } else {
+        solveOutcome = "interrupted";
+        const hadPartial = hasVisibleLiveOutput();
+
+        if (liveModel) {
+          finishLiveModel({
+            completionState: "interrupted",
+            emptyAnswer:
+              "⚠ Odgovor nije mogao da se završi:\n\n" +
+              message
+          });
+        } else {
+          history.push({
+            role: "model",
+            text:
+              "Greška pri pozivu Google API-ja:\n\n" +
+              message,
+            completionState: "interrupted",
+            timestamp: Date.now()
+          });
+          saveHistory();
+          render();
+        }
+
+        setStatus(
+          hadPartial
+            ? "Veza je prekinuta; sačuvan je prikazani deo odgovora."
+            : "Google API nije uspeo.",
+          true
+        );
+      }
+    } finally {
+      busy = false;
+      sendBtn.disabled = false;
+      el("pickImage").disabled = false;
+      el("newChat").disabled = false;
+      finishSolveControl(
+        solveOutcome === "completed"
+          ? "✓ Gotovo"
+          : solveOutcome === "stopped"
+            ? "Zaustavljeno"
+            : "Prekinuto"
+      );
+      scrollBottom(true);
     }
   }
 
@@ -7898,28 +6430,21 @@ window.MathJax = {
 
     saveGoogleProfiles(profiles);
 
-    const hasPendingBackgroundJob = findAllPendingChats(loadChats()).length > 0;
-    if (!hasPendingBackgroundJob) {
-      // Van aktivnog posla novi ključ ne nasleđuje tuđ server-side kontekst.
-      previousInteractionId = "";
-      previousInteractionProfileId = "";
-    }
+    // Ako je korisnik promenio ključeve/modele,
+    // stari server-side interaction ID možda pripada drugom profilu.
+    // Lokalna istorija ostaje, pa sledeći zahtev može bezbedno da je rekonstruiše.
+    previousInteractionId = "";
+    previousInteractionProfileId = "";
 
     closeKeyDialog();
     setStatus(
       `Sačuvano Google API slotova: ${configured.length}.`
     );
-    if (!hasPendingBackgroundJob) {
-      setTimeout(() => setStatus(""), 1200);
-    }
+    setTimeout(() => setStatus(""), 1200);
 
     if (waitingForInitialApiKey) {
       waitingForInitialApiKey = false;
-      if (hasPendingBackgroundJob) {
-        void resumePendingSolveIfNeeded();
-      } else {
-        openSourceSheet();
-      }
+      openSourceSheet();
     }
   });
 
@@ -7998,7 +6523,8 @@ window.MathJax = {
 
   el("mobileSolveTask").addEventListener("click", () => {
     closeMobileNav();
-    if (startNewChat()) openSourceSheet();
+    startNewChat();
+    openSourceSheet();
   });
 
   el("mobileHistory").addEventListener("click", () => {
@@ -8050,9 +6576,7 @@ window.MathJax = {
   });
 
   function openSourceSheet() {
-    if (focusGlobalPendingJob()) return false;
     sourceSheet.classList.add("show");
-    return true;
   }
 
   function closeSourceSheet() {
@@ -8061,7 +6585,8 @@ window.MathJax = {
 
   el("pickImage").addEventListener("click", openSourceSheet);
   el("solveTaskBtn").addEventListener("click", () => {
-    if (startNewChat()) openSourceSheet();
+    startNewChat();
+    openSourceSheet();
   });
   el("sourceCancel").addEventListener("click", closeSourceSheet);
 
@@ -8071,20 +6596,17 @@ window.MathJax = {
   });
 
   el("cameraChoice").addEventListener("click", () => {
-    if (focusGlobalPendingJob()) return;
     closeSourceSheet();
     cameraInput.click();
   });
 
   el("galleryChoice").addEventListener("click", () => {
-    if (focusGlobalPendingJob()) return;
     closeSourceSheet();
     galleryInput.click();
   });
 
   async function handleChosenImage(file) {
     if (!file) return;
-    if (focusGlobalPendingJob()) return;
 
     try {
       clearSelectedImage();
@@ -8384,107 +6906,12 @@ window.MathJax = {
 
   sendBtn.addEventListener("click", send);
   stopGenerationBtn.addEventListener("click", requestUserStop);
-  unknownRetryJob.addEventListener("click", () => {
-    void retryUnresolvedJobExplicitly();
-  });
-  unknownDiscardJob.addEventListener("click", () => {
-    void discardUnresolvedJobExplicitly();
-  });
 
   window.addEventListener("pagehide", () => {
-    if (activeJobLeaseId) {
-      try {
-        if (hasActiveJobOwnership()) checkpointActivePendingJob({}, true);
-      } catch {}
-      // Ogradi stari promise pre oslobađanja lifetime Web Lock-a. Dedicated
-      // abandon put zadržava lost=true, pa BFCache wake ne može ništa da upiše,
-      // dok drugi tab odmah može da nastavi isti sačuvani Interaction ID.
-      markJobOwnershipLost("Stranica je napuštena ili stavljena u BFCache.");
-      abandonJobLeaseForPagehide();
-    }
     for (const url of chatImageUrlCache.values()) {
       try { URL.revokeObjectURL(url); } catch {}
     }
     chatImageUrlCache.clear();
-  });
-
-  window.addEventListener("pageshow", () => {
-    void resumePendingSolveIfNeeded();
-  });
-
-  window.addEventListener("online", () => {
-    void resumePendingSolveIfNeeded();
-  });
-
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {
-      if (activeJobRunPromise && !hasActiveJobOwnership()) {
-        markJobOwnershipLost("Tab je vraćen bez važećeg background fence-a.");
-      }
-      void resumePendingSolveIfNeeded();
-    } else {
-      try {
-        if (hasActiveJobOwnership()) checkpointActivePendingJob({}, true);
-      } catch {}
-    }
-  });
-
-  window.addEventListener("storage", event => {
-    if (event.key === GLOBAL_JOB_LEASE_STORAGE) {
-      if ((activeJobRunPromise || activeJobLeaseId) && !hasActiveJobOwnership()) {
-        markJobOwnershipLost("Drugi tab je promenio globalni lease/fence token.");
-      } else if (!activeJobRunPromise && document.visibilityState === "visible") {
-        void resumePendingSolveIfNeeded();
-      }
-      return;
-    }
-
-    if (event.key !== CHATS_STORAGE) return;
-    const freshChats = loadChats();
-    const freshActive = freshChats.find(chat => chat.id === activeChatId);
-    const localActive = getActiveChat();
-    const freshJob = safePendingJob(freshActive?.pendingJob);
-    const localJob = safePendingJob(localActive?.pendingJob);
-
-    if (activeJobRunPromise || activeJobLeaseId) {
-      if (!hasActiveJobOwnership()) {
-        markJobOwnershipLost("Storage promena je stigla bez našeg fence-a.");
-        return;
-      }
-
-      // Tokom početnog čuvanja slike lease postoji pre pending zapisa. Tada je
-      // dozvoljena samo nepovezana promena istorije; runner još nema šta da prati.
-      if (!localJob && !activeJobRunPromise) return;
-
-      if (
-        !freshJob ||
-        !localJob ||
-        freshJob.localJobId !== localJob.localJobId
-      ) {
-        markJobOwnershipLost(
-          "Pending zapis je obrisan ili zamenjen u drugom tabu."
-        );
-        return;
-      }
-
-      // Vlasnik prima eventualni cancelRequested checkpoint, ali ni ovde ne
-      // sme da oživi stariji lokalni snapshot.
-      localActive.pendingJob = freshJob;
-      if (freshJob.cancelRequested) activeViewerController?.abort();
-      return;
-    }
-
-    chats = freshChats;
-    const updated = chats.find(chat => chat.id === activeChatId);
-    if (updated) {
-      history = safeMessages(updated.messages);
-      previousInteractionId = updated.interactionId || "";
-      previousInteractionProfileId = updated.interactionProfileId || "";
-      liveModel = null;
-      render();
-    }
-    renderHistoryList();
-    void resumePendingSolveIfNeeded();
   });
 
   applyTheme(getSavedTheme(), false);
@@ -8494,9 +6921,9 @@ window.MathJax = {
   renderHistoryList();
   autoGrow();
 
-  if (pendingChatOnLoad) {
-    void resumePendingSolveIfNeeded();
-  } else if (!getConfiguredGoogleProfiles().length) {
+  // Pri svakom svežem otvaranju fajla ostajemo na praznom novom chatu.
+  // Glavni početni ekran odmah nudi KAMERU ili GALERIJU.
+  if (!getConfiguredGoogleProfiles().length) {
     waitingForInitialApiKey = true;
     openKeyDialog();
   } else {
