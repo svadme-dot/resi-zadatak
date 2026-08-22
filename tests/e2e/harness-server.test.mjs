@@ -5,27 +5,22 @@ import { createHarnessServer } from './harness-server.mjs';
 
 const RETRY_PROMPT =
   'E2E ponovni pokušaj: reši jednačinu 2x + 3 = 11.';
-const PRIMARY_MODEL = 'gemini-3.7-flash';
-const FALLBACK_MODEL = 'gemini-3.6-flash';
+const MODEL = 'gemini-3.6-flash';
 const IMAGE_MODALITY_MESSAGE =
-  'Image input modality is not enabled for models/gemini-3.7-flash-agent';
+  'Image input modality is not enabled for models/gemini-3.6-flash-agent';
 const UNSUPPORTED_IMAGE_PAYLOAD_MESSAGE =
   'Unsupported image format/MIME';
 const HIGH_DEMAND_MESSAGE =
-  'gemini-3.7-flash is currently experiencing high demand, spikes in demand are usually temporary. Please try again later.';
-const EXPECTED_EIGHT_PROFILE_ORDER = [
-  ['e2e-api-1', PRIMARY_MODEL],
-  ['e2e-api-2', PRIMARY_MODEL],
-  ['e2e-api-3', PRIMARY_MODEL],
-  ['e2e-api-4', PRIMARY_MODEL],
-  ['e2e-api-1', FALLBACK_MODEL],
-  ['e2e-api-2', FALLBACK_MODEL],
-  ['e2e-api-3', FALLBACK_MODEL],
-  ['e2e-api-4', FALLBACK_MODEL]
+  'gemini-3.6-flash is currently experiencing high demand, spikes in demand are usually temporary. Please try again later.';
+const EXPECTED_FOUR_PROFILE_ORDER = [
+  ['e2e-api-1', MODEL],
+  ['e2e-api-2', MODEL],
+  ['e2e-api-3', MODEL],
+  ['e2e-api-4', MODEL]
 ];
 
 const validSolverBody = {
-  model: PRIMARY_MODEL,
+  model: MODEL,
   input: [
     {
       type: 'image',
@@ -222,7 +217,7 @@ test('request oracle rejects an agent alias and media_resolution impostor', asyn
   await withServer(async base => {
     const invalidBody = {
       ...validSolverBody,
-      model: 'gemini-3.7-flash-agent',
+      model: 'gemini-3.6-flash-agent',
       input: validSolverBody.input.map(part =>
         part.type === 'image'
           ? {
@@ -289,15 +284,15 @@ test('fallback scenario keeps API 1 at 429 and lets API 2 stream', async () => {
   });
 });
 
-test('fallback follows the exact four-key 3.7 then four-key 3.6 order', async () => {
+test('fallback follows the exact four-key 3.6 order', async () => {
   await withServer(async base => {
-    const run = 'eight-profile-order';
+    const run = 'four-profile-order';
     const endpoint =
       '/__mock/gemini/v1beta/interactions?alt=sse' +
-      '&scenario=fallback-eight&run=' + run;
+      '&scenario=fallback-four&run=' + run;
 
-    for (let index = 0; index < EXPECTED_EIGHT_PROFILE_ORDER.length; index++) {
-      const [apiKey, model] = EXPECTED_EIGHT_PROFILE_ORDER[index];
+    for (let index = 0; index < EXPECTED_FOUR_PROFILE_ORDER.length; index++) {
+      const [apiKey, model] = EXPECTED_FOUR_PROFILE_ORDER[index];
       const response = await postSolver(
         base,
         endpoint,
@@ -305,7 +300,7 @@ test('fallback follows the exact four-key 3.7 then four-key 3.6 order', async ()
         apiKey
       );
 
-      if (index < 7) {
+      if (index < 3) {
         assert.equal(response.status, 401);
       } else {
         assert.equal(response.status, 200);
@@ -315,17 +310,17 @@ test('fallback follows the exact four-key 3.7 then four-key 3.6 order', async ()
 
     const assertions = await fetch(
       base +
-        '/__harness__/assertions?scenario=fallback-eight&run=' +
+        '/__harness__/assertions?scenario=fallback-four&run=' +
         run
     ).then(item => item.json());
 
     assert.equal(assertions.ok, true);
     assert.deepEqual(assertions.scenarioChecks, {
-      exactEightProfileOrder: true,
-      firstSevenWereClassifiedFailures: true,
-      eighthProfileCompleted: true
+      exactFourProfileOrder: true,
+      firstThreeWereClassifiedFailures: true,
+      fourthProfileCompleted: true
     });
-    assert.equal(assertions.counts.solverRequests, 8);
+    assert.equal(assertions.counts.solverRequests, 4);
     assert.equal(
       assertions.requests.every(request =>
         request.checks.model &&
@@ -350,7 +345,7 @@ test('single-line SSE modality error advances to the next ordered tuple', async 
     const first = await postSolver(
       base,
       endpoint,
-      solverBodyForModel(PRIMARY_MODEL),
+      solverBodyForModel(MODEL),
       'e2e-api-1'
     );
     assert.equal(first.status, 200);
@@ -363,7 +358,7 @@ test('single-line SSE modality error advances to the next ordered tuple', async 
     const second = await postSolver(
       base,
       endpoint,
-      solverBodyForModel(PRIMARY_MODEL),
+      solverBodyForModel(MODEL),
       'e2e-api-2'
     );
     assert.equal(second.status, 200);
@@ -393,7 +388,7 @@ test('failed interaction completion advances without a sync duplicate', async ()
     const first = await postSolver(
       base,
       endpoint,
-      solverBodyForModel(PRIMARY_MODEL),
+      solverBodyForModel(MODEL),
       'e2e-api-1'
     );
     assert.equal(first.status, 200);
@@ -413,7 +408,7 @@ test('failed interaction completion advances without a sync duplicate', async ()
     const second = await postSolver(
       base,
       endpoint,
-      solverBodyForModel(PRIMARY_MODEL),
+      solverBodyForModel(MODEL),
       'e2e-api-2'
     );
     assert.equal(second.status, 200);
@@ -440,13 +435,13 @@ test('failed interaction completion advances without a sync duplicate', async ()
   });
 });
 
-test('thinking-only high demand reaches the eighth 3.7-to-3.6 tuple', async () => {
+test('thinking-only high demand reaches the fourth 3.6 tuple', async () => {
   await withServer(async base => {
     const run = 'thinking-only-high-demand';
     const endpoint =
       '/__mock/gemini/v1beta/interactions?alt=sse' +
-      '&scenario=thought-high-demand-to-3.6&run=' + run;
-    const expectedOrder = EXPECTED_EIGHT_PROFILE_ORDER;
+      '&scenario=thought-high-demand-four&run=' + run;
+    const expectedOrder = EXPECTED_FOUR_PROFILE_ORDER;
 
     for (let index = 0; index < expectedOrder.length; index++) {
       const [apiKey, model] = expectedOrder[index];
@@ -459,7 +454,7 @@ test('thinking-only high demand reaches the eighth 3.7-to-3.6 tuple', async () =
       assert.equal(response.status, 200);
       const wire = await response.text();
 
-      if (index < 7) {
+      if (index < 3) {
         const thoughtIndex = wire.indexOf('"type":"thought_summary"');
         const failureIndex = index % 2 === 0
           ? wire.indexOf('"event_type":"error"')
@@ -476,7 +471,7 @@ test('thinking-only high demand reaches the eighth 3.7-to-3.6 tuple', async () =
 
     const assertions = await fetch(
       base +
-        '/__harness__/assertions?scenario=thought-high-demand-to-3.6&run=' +
+        '/__harness__/assertions?scenario=thought-high-demand-four&run=' +
         run
     ).then(item => item.json());
     assert.equal(assertions.ok, true);
@@ -484,10 +479,10 @@ test('thinking-only high demand reaches the eighth 3.7-to-3.6 tuple', async () =
       exactThoughtHighDemandFallbackOrder: true,
       allFailedTuplesHadThoughtButNoAnswer: true,
       streamAndTerminalDemandErrorsWereHandled: true,
-      eighthTupleCompleted: true,
+      fourthTupleCompleted: true,
       noSyncDuplicateDuringDemandFallback: true
     });
-    assert.equal(assertions.counts.solverRequests, 8);
+    assert.equal(assertions.counts.solverRequests, 4);
   });
 });
 
@@ -500,7 +495,7 @@ test('high demand after answer output stops without profile fallback', async () 
     const response = await postSolver(
       base,
       endpoint,
-      solverBodyForModel(PRIMARY_MODEL),
+      solverBodyForModel(MODEL),
       'e2e-api-1'
     );
     assert.equal(response.status, 200);
@@ -528,7 +523,7 @@ test('high demand after answer output stops without profile fallback', async () 
     const forbiddenSecond = await postSolver(
       base,
       endpoint,
-      solverBodyForModel(PRIMARY_MODEL),
+      solverBodyForModel(MODEL),
       'e2e-api-2'
     );
     assert.equal(forbiddenSecond.status, 409);
@@ -550,7 +545,7 @@ test('unsupported image format payload error never traverses profiles', async ()
     const first = await postSolver(
       base,
       endpoint,
-      solverBodyForModel(PRIMARY_MODEL),
+      solverBodyForModel(MODEL),
       'e2e-api-1'
     );
     assert.equal(first.status, 200);
@@ -571,7 +566,7 @@ test('unsupported image format payload error never traverses profiles', async ()
     const forbiddenSecond = await postSolver(
       base,
       endpoint,
-      solverBodyForModel(PRIMARY_MODEL),
+      solverBodyForModel(MODEL),
       'e2e-api-2'
     );
     assert.equal(forbiddenSecond.status, 409);
@@ -656,7 +651,7 @@ test('transport failure after partial output never continues profiles', async ()
     const unexpectedContinuation = await postSolver(
       base,
       endpoint,
-      solverBodyForModel(PRIMARY_MODEL),
+      solverBodyForModel(MODEL),
       'e2e-api-2'
     );
     assert.equal(unexpectedContinuation.status, 409);

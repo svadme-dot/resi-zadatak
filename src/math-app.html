@@ -2526,8 +2526,7 @@ window.MathJax = {
       <button id="googleApiClose" class="googleApiNavBtn googleApiCloseBtn" type="button" title="Zatvori" aria-label="Zatvori">×</button>
     </div>
     <p>
-      Aplikacija prvo pokušava <b>Gemini 3.7 Flash: API 1 → 2 → 3 → 4</b>,
-      pa zatim <b>Gemini 3.6 Flash: API 1 → 2 → 3 → 4</b>.
+      Aplikacija koristi <b>Gemini 3.6 Flash: API 1 → 2 → 3 → 4</b>.
       Na sledeći pokušaj prelazi samo kada model nije dostupan ili ne podržava
       zahtev, kada ključ, kvota ili Google servis zakažu, i to pre nego što se
       pojavi bilo koji deo odgovora.
@@ -2537,34 +2536,32 @@ window.MathJax = {
     <div class="apiSlots">
       <div class="apiSlot">
         <div class="apiSlotHead"><strong>API ključ 1</strong><span>primarni</span></div>
-        <input id="googleModel1" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.7-flash → gemini-3.6-flash" readonly aria-readonly="true">
+        <input id="googleModel1" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
         <input id="googleKey1" class="field" type="password" autocomplete="off" placeholder="API ključ 1">
       </div>
 
       <div class="apiSlot">
         <div class="apiSlotHead"><strong>API ključ 2</strong><span>rezerva</span></div>
-        <input id="googleModel2" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.7-flash → gemini-3.6-flash" readonly aria-readonly="true">
+        <input id="googleModel2" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
         <input id="googleKey2" class="field" type="password" autocomplete="off" placeholder="API ključ 2">
       </div>
 
       <div class="apiSlot">
         <div class="apiSlotHead"><strong>API ključ 3</strong><span>rezerva</span></div>
-        <input id="googleModel3" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.7-flash → gemini-3.6-flash" readonly aria-readonly="true">
+        <input id="googleModel3" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
         <input id="googleKey3" class="field" type="password" autocomplete="off" placeholder="API ključ 3">
       </div>
 
       <div class="apiSlot">
         <div class="apiSlotHead"><strong>API ključ 4</strong><span>poslednja rezerva</span></div>
-        <input id="googleModel4" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.7-flash → gemini-3.6-flash" readonly aria-readonly="true">
+        <input id="googleModel4" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
         <input id="googleKey4" class="field" type="password" autocomplete="off" placeholder="API ključ 4">
       </div>
     </div>
 
     <button id="saveKey" class="primary">Sačuvaj API ključeve</button>
     <p class="note">
-      Sva četiri ključa prvo koriste <b>Gemini 3.7 Flash</b>, a ako nijedan
-      pokušaj ne uspe bez parcijalnog odgovora, isti ključevi se redom ponovo
-      pokušavaju sa <b>Gemini 3.6 Flash</b>.
+      Sva četiri ključa koriste <b>Gemini 3.6 Flash</b> redom od API 1 do API 4.
       Ključevi se čuvaju samo lokalno u <b>localStorage</b>.
     </p>
   </div>
@@ -2574,14 +2571,11 @@ window.MathJax = {
 (() => {
   "use strict";
 
-  const PRIMARY_MODEL = "gemini-3.7-flash";
-  const FALLBACK_MODEL = "gemini-3.6-flash";
+  const PRIMARY_MODEL = "gemini-3.6-flash";
   const MODEL_ATTEMPT_ORDER = Object.freeze([
-    PRIMARY_MODEL,
-    FALLBACK_MODEL
+    PRIMARY_MODEL
   ]);
-  const MODEL_SEQUENCE_LABEL =
-    `${PRIMARY_MODEL} → ${FALLBACK_MODEL}`;
+  const MODEL_SEQUENCE_LABEL = PRIMARY_MODEL;
   const IMAGE_MEDIA_RESOLUTION = "high";
   const API_STREAM_URL =
     "https://generativelanguage.googleapis.com/v1beta/interactions?alt=sse";
@@ -3867,7 +3861,7 @@ window.MathJax = {
     const configuredSlots = loadGoogleProfiles()
       .filter(profile => profile.key);
 
-    // Tačan redosled: svi ključevi sa 3.7, pa isti ključevi sa 3.6.
+    // Tačan redosled: Gemini 3.6 preko API ključeva 1, 2, 3 i 4.
     return MODEL_ATTEMPT_ORDER.flatMap(model =>
       configuredSlots.map(profile => ({
         slot: profile.slot,
@@ -3882,8 +3876,7 @@ window.MathJax = {
   }
 
   function modelDisplayName(model) {
-    if (model === PRIMARY_MODEL) return "Gemini 3.7 Flash";
-    if (model === FALLBACK_MODEL) return "Gemini 3.6 Flash";
+    if (model === PRIMARY_MODEL) return "Gemini 3.6 Flash";
     return String(model || "Gemini");
   }
 

@@ -11,35 +11,30 @@ const GEMINI_ORIGIN =
   'https://generativelanguage.googleapis.com/v1beta/interactions';
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 4173;
-const PRIMARY_MODEL = 'gemini-3.7-flash';
-const FALLBACK_MODEL = 'gemini-3.6-flash';
+const MODEL = 'gemini-3.6-flash';
 const IMAGE_MODALITY_MESSAGE =
-  'Image input modality is not enabled for models/gemini-3.7-flash-agent';
+  'Image input modality is not enabled for models/gemini-3.6-flash-agent';
 const UNSUPPORTED_IMAGE_PAYLOAD_MESSAGE =
   'Unsupported image format/MIME';
 const HIGH_DEMAND_MESSAGE =
-  'gemini-3.7-flash is currently experiencing high demand, spikes in demand are usually temporary. Please try again later.';
-const EXPECTED_EIGHT_PROFILE_ORDER = [
-  ['e2e-api-1', PRIMARY_MODEL],
-  ['e2e-api-2', PRIMARY_MODEL],
-  ['e2e-api-3', PRIMARY_MODEL],
-  ['e2e-api-4', PRIMARY_MODEL],
-  ['e2e-api-1', FALLBACK_MODEL],
-  ['e2e-api-2', FALLBACK_MODEL],
-  ['e2e-api-3', FALLBACK_MODEL],
-  ['e2e-api-4', FALLBACK_MODEL]
+  'gemini-3.6-flash is currently experiencing high demand, spikes in demand are usually temporary. Please try again later.';
+const EXPECTED_FOUR_PROFILE_ORDER = [
+  ['e2e-api-1', MODEL],
+  ['e2e-api-2', MODEL],
+  ['e2e-api-3', MODEL],
+  ['e2e-api-4', MODEL]
 ];
 const EXPECTED_THOUGHT_HIGH_DEMAND_ORDER =
-  EXPECTED_EIGHT_PROFILE_ORDER.map(tuple => [...tuple]);
+  EXPECTED_FOUR_PROFILE_ORDER.map(tuple => [...tuple]);
 const VALID_SCENARIOS = new Set([
   'success',
   'slow',
   'fallback-429',
-  'fallback-eight',
+  'fallback-four',
   'partial-no-continue',
   'sse-error-next-profile',
   'terminal-failed-next-profile',
-  'thought-high-demand-to-3.6',
+  'thought-high-demand-four',
   'answer-high-demand-no-fallback',
   'payload-error-no-fallback',
   'retry-after-reload'
@@ -172,7 +167,7 @@ function evaluateSolverRequest(record) {
   const forbidden = findForbiddenSearchConfig(body);
   const checks = {
     model:
-      body.model === PRIMARY_MODEL || body.model === FALLBACK_MODEL,
+      body.model === MODEL,
     thinkingLevel:
       body.generation_config?.thinking_level === 'high',
     thinkingSummaries:
@@ -246,22 +241,22 @@ function evaluateRequests(requestLog, options = {}) {
         Math.min(...api2.map(record => record.id));
   }
 
-  if (scenario === 'fallback-eight') {
+  if (scenario === 'fallback-four') {
     const actualOrder = solverRecords.map(record => [
       record.apiKey,
       String(record.body?.model || '')
     ]);
-    scenarioChecks.exactEightProfileOrder =
+    scenarioChecks.exactFourProfileOrder =
       JSON.stringify(actualOrder) ===
-      JSON.stringify(EXPECTED_EIGHT_PROFILE_ORDER);
-    scenarioChecks.firstSevenWereClassifiedFailures =
-      solverRecords.length === 8 &&
-      solverRecords.slice(0, 7).every(record =>
+      JSON.stringify(EXPECTED_FOUR_PROFILE_ORDER);
+    scenarioChecks.firstThreeWereClassifiedFailures =
+      solverRecords.length === 4 &&
+      solverRecords.slice(0, 3).every(record =>
         record.response?.status === 401 &&
         record.response?.outcome === 'classified-profile-failure'
       );
-    scenarioChecks.eighthProfileCompleted =
-      solverRecords[7]?.response?.outcome === 'completed';
+    scenarioChecks.fourthProfileCompleted =
+      solverRecords[3]?.response?.outcome === 'completed';
   }
 
   if (scenario === 'sse-error-next-profile') {
@@ -275,8 +270,8 @@ function evaluateRequests(requestLog, options = {}) {
       solverRecords[0]?.response?.message === IMAGE_MODALITY_MESSAGE;
     scenarioChecks.advancedToNextOrderedTuple =
       JSON.stringify(actualOrder) === JSON.stringify([
-        ['e2e-api-1', PRIMARY_MODEL],
-        ['e2e-api-2', PRIMARY_MODEL]
+        ['e2e-api-1', MODEL],
+        ['e2e-api-2', MODEL]
       ]) &&
       solverRecords[1]?.response?.outcome === 'completed';
     scenarioChecks.noSyncDuplicateForSseError =
@@ -293,29 +288,29 @@ function evaluateRequests(requestLog, options = {}) {
       solverRecords[0]?.response?.message === IMAGE_MODALITY_MESSAGE;
     scenarioChecks.failedCompletionAdvancedDirectly =
       JSON.stringify(actualOrder) === JSON.stringify([
-        ['e2e-api-1', PRIMARY_MODEL],
-        ['e2e-api-2', PRIMARY_MODEL]
+        ['e2e-api-1', MODEL],
+        ['e2e-api-2', MODEL]
       ]) &&
       solverRecords[1]?.response?.outcome === 'completed';
     scenarioChecks.zeroSyncDuplicatesOnFailedTuple =
       !solverRecords.some(record =>
         record.apiKey === 'e2e-api-1' &&
-        record.body?.model === PRIMARY_MODEL &&
+        record.body?.model === MODEL &&
         record.body?.stream === false
       );
   }
 
-  if (scenario === 'thought-high-demand-to-3.6') {
+  if (scenario === 'thought-high-demand-four') {
     const actualOrder = solverRecords.map(record => [
       record.apiKey,
       String(record.body?.model || '')
     ]);
-    const failedAttempts = solverRecords.slice(0, 7);
+    const failedAttempts = solverRecords.slice(0, 3);
     scenarioChecks.exactThoughtHighDemandFallbackOrder =
       JSON.stringify(actualOrder) ===
       JSON.stringify(EXPECTED_THOUGHT_HIGH_DEMAND_ORDER);
     scenarioChecks.allFailedTuplesHadThoughtButNoAnswer =
-      failedAttempts.length === 7 &&
+      failedAttempts.length === 3 &&
       failedAttempts.every(record =>
         /currently experiencing high demand/i.test(
           String(record.response?.message || '')
@@ -326,14 +321,14 @@ function evaluateRequests(requestLog, options = {}) {
     scenarioChecks.streamAndTerminalDemandErrorsWereHandled =
       failedAttempts.filter(record =>
         record.response?.failureShape === 'stream-error'
-      ).length === 4 &&
+      ).length === 2 &&
       failedAttempts.filter(record =>
         record.response?.failureShape === 'terminal-failed'
-      ).length === 3;
-    scenarioChecks.eighthTupleCompleted =
-      solverRecords[7]?.apiKey === 'e2e-api-4' &&
-      solverRecords[7]?.body?.model === FALLBACK_MODEL &&
-      solverRecords[7]?.response?.outcome === 'completed';
+      ).length === 1;
+    scenarioChecks.fourthTupleCompleted =
+      solverRecords[3]?.apiKey === 'e2e-api-4' &&
+      solverRecords[3]?.body?.model === MODEL &&
+      solverRecords[3]?.response?.outcome === 'completed';
     scenarioChecks.noSyncDuplicateDuringDemandFallback =
       !solverRecords.some(record => record.body?.stream === false);
   }
@@ -348,7 +343,7 @@ function evaluateRequests(requestLog, options = {}) {
     scenarioChecks.answerThenHighDemandStoppedImmediately =
       solverRecords.length === 1 &&
       first?.apiKey === 'e2e-api-1' &&
-      first?.body?.model === PRIMARY_MODEL;
+      first?.body?.model === MODEL;
   }
 
   if (scenario === 'payload-error-no-fallback') {
@@ -359,7 +354,7 @@ function evaluateRequests(requestLog, options = {}) {
     scenarioChecks.payloadErrorStoppedImmediately =
       solverRecords.length === 1 &&
       solverRecords[0]?.apiKey === 'e2e-api-1' &&
-      solverRecords[0]?.body?.model === PRIMARY_MODEL;
+      solverRecords[0]?.body?.model === MODEL;
   }
 
   if (scenario === 'slow' && options.expectStop) {
@@ -868,9 +863,7 @@ function streamThoughtThenHighDemand(
 ) {
   const interactionId =
     'mock-thought-demand-' + String(record.id).padStart(3, '0');
-  const message = record.body?.model === FALLBACK_MODEL
-    ? HIGH_DEMAND_MESSAGE.replace(PRIMARY_MODEL, FALLBACK_MODEL)
-    : HIGH_DEMAND_MESSAGE;
+  const message = HIGH_DEMAND_MESSAGE;
   const events = [
     {
       event_type: 'interaction.created',
@@ -964,7 +957,7 @@ function harnessBootstrap() {
     '<script id="math-e2e-bootstrap">',
     '(function () {',
     '  var params = new URLSearchParams(location.search);',
-    '  var allowed = ["success", "slow", "fallback-429", "fallback-eight", "partial-no-continue", "sse-error-next-profile", "terminal-failed-next-profile", "thought-high-demand-to-3.6", "answer-high-demand-no-fallback", "payload-error-no-fallback", "retry-after-reload"];',
+    '  var allowed = ["success", "slow", "fallback-429", "fallback-four", "partial-no-continue", "sse-error-next-profile", "terminal-failed-next-profile", "thought-high-demand-four", "answer-high-demand-no-fallback", "payload-error-no-fallback", "retry-after-reload"];',
     '  var scenario = params.get("scenario") || "success";',
     '  if (allowed.indexOf(scenario) === -1) scenario = "success";',
     '  var runId = params.get("run") || scenario;',
@@ -973,12 +966,12 @@ function harnessBootstrap() {
     '    localStorage.clear();',
     '    sessionStorage.setItem(freshKey, "1");',
     '  }',
-    '  var allKeys = ["slow", "fallback-eight", "partial-no-continue", "sse-error-next-profile", "terminal-failed-next-profile", "thought-high-demand-to-3.6", "answer-high-demand-no-fallback", "payload-error-no-fallback"].indexOf(scenario) !== -1;',
+    '  var allKeys = ["slow", "fallback-four", "partial-no-continue", "sse-error-next-profile", "terminal-failed-next-profile", "thought-high-demand-four", "answer-high-demand-no-fallback", "payload-error-no-fallback"].indexOf(scenario) !== -1;',
     '  var configuredKeyCount = allKeys ? 4 : scenario === "fallback-429" ? 2 : 1;',
     '  var profiles = [1, 2, 3, 4].map(function (slot) {',
     '    return {',
     '      key: slot <= configuredKeyCount ? "e2e-api-" + slot : "",',
-    '      model: "gemini-3.7-flash"',
+    '      model: "gemini-3.6-flash"',
     '    };',
     '  });',
     '  localStorage.setItem(',
@@ -1077,11 +1070,11 @@ function dashboardHtml(host, port) {
     '<li><a href="' + base + '/docs/?scenario=success&fresh=1">Success stream</a></li>',
     '<li><a href="' + base + '/docs/?scenario=slow&fresh=1">Slow stream for Stop</a></li>',
     '<li><a href="' + base + '/docs/?scenario=fallback-429&fresh=1">API 1 returns 429, API 2 succeeds</a></li>',
-    '<li><a href="' + base + '/docs/?scenario=fallback-eight&fresh=1">Exact 8-profile fallback order</a></li>',
+    '<li><a href="' + base + '/docs/?scenario=fallback-four&fresh=1">Exact 4-profile fallback order</a></li>',
     '<li><a href="' + base + '/docs/?scenario=partial-no-continue&fresh=1">Partial output must not continue</a></li>',
     '<li><a href="' + base + '/docs/?scenario=sse-error-next-profile&fresh=1">Single-line SSE modality error advances</a></li>',
     '<li><a href="' + base + '/docs/?scenario=terminal-failed-next-profile&fresh=1">Failed completion advances without sync duplicate</a></li>',
-    '<li><a href="' + base + '/docs/?scenario=thought-high-demand-to-3.6&fresh=1">Thinking-only high demand reaches 3.6</a></li>',
+    '<li><a href="' + base + '/docs/?scenario=thought-high-demand-four&fresh=1">Thinking-only high demand reaches API 4</a></li>',
     '<li><a href="' + base + '/docs/?scenario=answer-high-demand-no-fallback&fresh=1">Answer then high demand must not continue</a></li>',
     '<li><a href="' + base + '/docs/?scenario=payload-error-no-fallback&fresh=1">Unsupported image payload must stop</a></li>',
     '<li><a href="' + base + '/docs/?scenario=retry-after-reload&fresh=1&run=' + retryRun + '">Reload then empty-Send retry (automatic)</a></li>',
@@ -1091,11 +1084,11 @@ function dashboardHtml(host, port) {
     '<li><a href="/__harness__/assertions">All request assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=success">Success assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=fallback-429">Fallback assertions</a></li>',
-    '<li><a href="/__harness__/assertions?scenario=fallback-eight">8-profile order assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=fallback-four">4-profile order assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=partial-no-continue">Partial/no-continuation assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=sse-error-next-profile">SSE error propagation assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=terminal-failed-next-profile">Failed completion assertions</a></li>',
-    '<li><a href="/__harness__/assertions?scenario=thought-high-demand-to-3.6">Thinking-only high-demand assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=thought-high-demand-four">Thinking-only high-demand assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=answer-high-demand-no-fallback">Answer/high-demand guard assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=payload-error-no-fallback">Payload classifier assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=slow&expectStop=1">Stop/abort assertions</a></li>',
@@ -1314,9 +1307,9 @@ export function createHarnessServer() {
           return;
         }
 
-        if (scenario === 'fallback-eight') {
+        if (scenario === 'fallback-four') {
           const expected =
-            EXPECTED_EIGHT_PROFILE_ORDER[scenarioRequestIndex - 1];
+            EXPECTED_FOUR_PROFILE_ORDER[scenarioRequestIndex - 1];
           const tupleMatches = Boolean(
             expected &&
             expected[0] === apiKey &&
@@ -1341,7 +1334,7 @@ export function createHarnessServer() {
             return;
           }
 
-          if (scenarioRequestIndex <= 7) {
+          if (scenarioRequestIndex <= 3) {
             record.response = {
               status: 401,
               outcome: 'classified-profile-failure',
@@ -1365,9 +1358,9 @@ export function createHarnessServer() {
           scenario === 'terminal-failed-next-profile'
         ) {
           const expected = scenarioRequestIndex === 1
-            ? ['e2e-api-1', PRIMARY_MODEL]
+            ? ['e2e-api-1', MODEL]
             : scenarioRequestIndex === 2
-              ? ['e2e-api-2', PRIMARY_MODEL]
+              ? ['e2e-api-2', MODEL]
               : null;
           const tupleMatches = Boolean(
             expected &&
@@ -1408,7 +1401,7 @@ export function createHarnessServer() {
           }
         }
 
-        if (scenario === 'thought-high-demand-to-3.6') {
+        if (scenario === 'thought-high-demand-four') {
           const expected =
             EXPECTED_THOUGHT_HIGH_DEMAND_ORDER[scenarioRequestIndex - 1];
           const tupleMatches = Boolean(
@@ -1429,13 +1422,13 @@ export function createHarnessServer() {
                 code: 409,
                 status: 'FAILED_PRECONDITION',
                 message:
-                  'Deterministic mock: expected all 3.7 tuples, then all 3.6 tuples.'
+                  'Deterministic mock: expected API 1-4 on gemini-3.6-flash.'
               }
             });
             return;
           }
 
-          if (scenarioRequestIndex <= 7) {
+          if (scenarioRequestIndex <= 3) {
             streamThoughtThenHighDemand(
               res,
               record,
@@ -1451,7 +1444,7 @@ export function createHarnessServer() {
           const firstTuple =
             scenarioRequestIndex === 1 &&
             apiKey === 'e2e-api-1' &&
-            body?.model === PRIMARY_MODEL;
+            body?.model === MODEL;
 
           if (!firstTuple) {
             record.response = {
@@ -1486,7 +1479,7 @@ export function createHarnessServer() {
           const firstTuple =
             scenarioRequestIndex === 1 &&
             apiKey === 'e2e-api-1' &&
-            body?.model === PRIMARY_MODEL;
+            body?.model === MODEL;
 
           if (!firstTuple) {
             record.response = {
@@ -1685,11 +1678,11 @@ if (isMain) {
         'Success:   http://' + host + ':' + actualPort + '/docs/?scenario=success&fresh=1',
         'Slow/Stop: http://' + host + ':' + actualPort + '/docs/?scenario=slow&fresh=1',
         'Fallback:  http://' + host + ':' + actualPort + '/docs/?scenario=fallback-429&fresh=1',
-        '8 profiles:http://' + host + ':' + actualPort + '/docs/?scenario=fallback-eight&fresh=1',
+        '4 profiles:http://' + host + ':' + actualPort + '/docs/?scenario=fallback-four&fresh=1',
         'Partial:   http://' + host + ':' + actualPort + '/docs/?scenario=partial-no-continue&fresh=1',
         'SSE error: http://' + host + ':' + actualPort + '/docs/?scenario=sse-error-next-profile&fresh=1',
         'Failed:    http://' + host + ':' + actualPort + '/docs/?scenario=terminal-failed-next-profile&fresh=1',
-        'Demand:    http://' + host + ':' + actualPort + '/docs/?scenario=thought-high-demand-to-3.6&fresh=1',
+        'Demand:    http://' + host + ':' + actualPort + '/docs/?scenario=thought-high-demand-four&fresh=1',
         'Answer:    http://' + host + ':' + actualPort + '/docs/?scenario=answer-high-demand-no-fallback&fresh=1',
         'Payload:   http://' + host + ':' + actualPort + '/docs/?scenario=payload-error-no-fallback&fresh=1',
         'Retry:     http://' + host + ':' + actualPort + '/docs/?scenario=retry-after-reload&fresh=1&run=retry-' + Date.now(),

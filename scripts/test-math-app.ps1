@@ -34,14 +34,14 @@ $interactionInput = $source.Substring($inputStart, $inputEnd - $inputStart)
 Assert-True ($source -match '<div class="mobileNavModel">Re.avanje zadataka</div>') `
   "bocni meni mora prikazivati trazeni podnaslov"
 
-Assert-True ($source -match 'const\s+PRIMARY_MODEL\s*=\s*"gemini-3\.7-flash"') `
-  "primarni model mora biti Gemini 3.7 Flash"
-Assert-True ($source -match 'const\s+FALLBACK_MODEL\s*=\s*"gemini-3\.6-flash"') `
-  "rezervni model mora biti Gemini 3.6 Flash"
+Assert-True ($source -match 'const\s+PRIMARY_MODEL\s*=\s*"gemini-3\.6-flash"') `
+  "jedini model mora biti Gemini 3.6 Flash"
+Assert-True ($source -notmatch 'gemini-3\.7-flash|FALLBACK_MODEL') `
+  "Gemini 3.7 i drugi model ne smeju ostati u aplikaciji"
 Assert-True ($request -match 'model:\s*requireAttemptModel\(model\)') `
   "glavni zahtev mora koristiti validirani model tekuceg pokusaja"
-Assert-True ($request -notmatch 'model:\s*PRIMARY_MODEL|model:\s*FALLBACK_MODEL') `
-  "glavni zahtev ne sme hardkodovati samo jedan model"
+Assert-True ($request -notmatch 'model:\s*PRIMARY_MODEL') `
+  "glavni zahtev mora koristiti model aktivnog API pokusaja"
 Assert-True ($interactionInput -match 'resolution:\s*IMAGE_MEDIA_RESOLUTION') `
   "svaka slika mora traziti high media resolution"
 Assert-True ($source -match 'const\s+IMAGE_MEDIA_RESOLUTION\s*=\s*"high"') `
@@ -59,10 +59,12 @@ Assert-True ($request -notmatch 'background\s*:\s*true') `
 
 Assert-True ((Count-Matches $source 'id="googleModel[1-4]"[^>]*readonly') -eq 4) `
   "sva četiri polja modela moraju biti fiksna/readonly"
-Assert-True ((Count-Matches $source 'value="gemini-3\.7-flash\s+.\s+gemini-3\.6-flash"') -eq 4) `
-  "sva cetiri polja moraju prikazati redosled 3.7 pa 3.6"
+Assert-True ((Count-Matches $source 'value="gemini-3\.6-flash"') -eq 4) `
+  "sva cetiri polja moraju prikazati samo Gemini 3.6 Flash"
+Assert-True ($source -match 'MODEL_ATTEMPT_ORDER\s*=\s*Object\.freeze\(\[\s*PRIMARY_MODEL\s*\]\)') `
+  "redosled modela mora sadrzati samo Gemini 3.6 Flash"
 Assert-True ($source -match 'MODEL_ATTEMPT_ORDER\.flatMap\(model\s*=>\s*\r?\n\s*configuredSlots\.map') `
-  "redosled mora biti svi API slotovi na 3.7 pa isti slotovi na 3.6"
+  "redosled mora biti API slotovi 1 do 4 samo na Gemini 3.6 Flash"
 Assert-True ($source -notmatch 'DEFAULT_MODEL') `
   "stari single-model DEFAULT_MODEL ne sme ostati u izvoru"
 Assert-True ($source -notmatch 'requestGeneratedChatTitle') `
@@ -112,12 +114,12 @@ Assert-True ($source -notmatch 'google_search|googleSearch|google_search_retriev
 
 Assert-True ($loader -notmatch 'window\.fetch\s*=|AbortSignal\.timeout|realSetTimeout') `
   "loader više ne sme sadržati Stop monkeypatch"
-Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=14') -eq 9) `
-  "loader mora koristiti svih 9 chunk URL-ova sa v=13"
-Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v20"') `
-  "service worker cache mora biti v19"
-Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=14') -eq 9) `
-  "service worker mora keširati svih 9 chunk URL-ova sa v=13"
+Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=15') -eq 9) `
+  "loader mora koristiti svih 9 chunk URL-ova sa v=15"
+Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v21"') `
+  "service worker cache mora biti v21"
+Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=15') -eq 9) `
+  "service worker mora keširati svih 9 chunk URL-ova sa v=15"
 
 & (Join-Path $PSScriptRoot "build-math-app.ps1") -CheckOnly | Out-Null
 Write-Output "Sve statičke provere matematičke aplikacije su prošle."

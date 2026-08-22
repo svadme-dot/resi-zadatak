@@ -17,7 +17,7 @@
 <body><div>Pokrećem Matematiku…</div>
 <script>
 (async()=>{
- const files=['./app-v5/part-0.txt?v=14', './app-v5/part-1.txt?v=14', './app-v5/part-2.txt?v=14', './app-v5/part-3.txt?v=14', './app-v5/part-4.txt?v=14', './app-v5/part-5a.txt?v=14', './app-v5/part-5b.txt?v=14', './app-v5/part-6.txt?v=14', './app-v5/part-7.txt?v=14']; let b64="";
+ const files=['./app-v5/part-0.txt?v=15', './app-v5/part-1.txt?v=15', './app-v5/part-2.txt?v=15', './app-v5/part-3.txt?v=15', './app-v5/part-4.txt?v=15', './app-v5/part-5a.txt?v=15', './app-v5/part-5b.txt?v=15', './app-v5/part-6.txt?v=15', './app-v5/part-7.txt?v=15']; let b64="";
  for(const file of files){const r=await fetch(file,{cache:"no-store"});if(!r.ok)throw new Error("Nedostaje "+file);b64+=await r.text();}
  const bin=atob(b64.trim());const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
  const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));const html=await new Response(stream).text();
