@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import test from 'node:test';
 import { createHarnessServer } from './harness-server.mjs';
 
 const validSolverBody = {
-  model: 'gemini-3.6-flash',
+  model: 'gemini-3.7-flash',
   input: [
     {
       type: 'image',
@@ -30,6 +31,26 @@ const validBackgroundBody = {
   stream: false,
   background: true
 };
+
+async function validPngBackgroundBody() {
+  const png = await fs.readFile(
+    new URL('./fixtures/linear-equation.png', import.meta.url)
+  );
+  return {
+    ...validBackgroundBody,
+    input: [
+      {
+        type: 'image',
+        mime_type: 'image/png',
+        data: png.toString('base64')
+      },
+      {
+        type: 'text',
+        text: 'Reši zadatak sa ove PNG slike.'
+      }
+    ]
+  };
+}
 
 function apiHeaders(slot = 1, accept = 'application/json') {
   return {
@@ -344,6 +365,189 @@ test('background fallback keeps the failed create on API 1 and the same-ID recov
     assert.equal(assertions.scenarioChecks.api1WasBeforeApi2, true);
     assert.equal(assertions.transportChecks.apiRevisionAbsent, true);
   });
+});
+
+test('legacy success mock demonstrates why the real PNG modality failure was previously invisible', async () => {
+  await withServer(async base => {
+    const body = await validPngBackgroundBody();
+    const response = await fetch(
+      base +
+        '/__mock/gemini/v1beta/interactions?scenario=success&run=legacy-png-success',
+      {
+        method: 'POST',
+        headers: apiHeaders(1),
+        body: JSON.stringify(body)
+      }
+    );
+    const created = await response.json();
+    const stream = await fetch(
+      interactionUrl(base, created.id, 'success', '?stream=true'),
+      { headers: apiHeaders(1, 'text/event-stream') }
+    );
+    assert.match(await stream.text(), /interaction\.completed/);
+    const canonical = await fetch(
+      interactionUrl(base, created.id, 'success'),
+      { headers: apiHeaders(1) }
+    ).then(item => item.json());
+
+    // This deterministic success is exactly the old blind spot: it proves
+    // only that the browser sent a syntactically valid request, not that the
+    // Google backend accepted image modality for its internal agent route.
+    assert.equal(canonical.status, 'completed');
+    assert.equal(canonical.errors, undefined);
+  });
+});
+
+test('PNG modality terminal errors[] is a failed Interaction, never fake success or user Stop', async () => {
+  await withServer(async base => {
+    const scenario = 'image-modality-error';
+    const tabId = 'tab-png-modality';
+    const body = await validPngBackgroundBody();
+    await registerClient(base, scenario, tabId);
+
+    const created = await fetch(
+      base +
+        '/__mock/gemini/v1beta/interactions?scenario=' +
+        scenario +
+        '&e2e_tab=' +
+        tabId,
+      {
+        method: 'POST',
+        headers: apiHeaders(1),
+        body: JSON.stringify(body)
+      }
+    ).then(item => item.json());
+    assert.equal(created.status, 'in_progress');
+
+    const stream = await fetch(
+      interactionUrl(
+        base,
+        created.id,
+        scenario,
+        '?stream=true',
+        tabId
+      ),
+      { headers: apiHeaders(1, 'text/event-stream') }
+    );
+    const streamText = await stream.text();
+    assert.match(streamText, /interaction\.completed/);
+    assert.match(streamText, /"status":"failed"/);
+    assert.doesNotMatch(streamText, /model_output/);
+
+    const canonical = await fetch(
+      interactionUrl(base, created.id, scenario, '', tabId),
+      { headers: apiHeaders(1) }
+    ).then(item => item.json());
+    assert.equal(canonical.status, 'failed');
+    assert.deepEqual(canonical.errors, [
+      {
+        code: 400,
+        message:
+          'Image input modality is not enabled for models/gemini-3.7-flash-agent'
+      }
+    ]);
+
+    // Until the real app reports its terminal UI classification, the harness
+    // must fail closed instead of treating protocol completion as success.
+    const beforeUi = await fetch(
+      base + '/__harness__/assertions?scenario=' + scenario
+    ).then(item => item.json());
+    assert.equal(beforeUi.ok, false);
+    assert.equal(
+      beforeUi.scenarioChecks.googleErrorsArrayWasCanonicalFailure,
+      true
+    );
+    assert.equal(
+      beforeUi.scenarioChecks.appClassifiedFailureAsInterrupted,
+      false
+    );
+
+    // Browser runs emit this automatically from persisted chat state. The
+    // unit protocol test supplies the same evidence deterministically.
+    await fetch(base + '/__harness__/client', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scenario,
+        run: scenario,
+        tabId,
+        event: 'terminal-classification',
+        detail: {
+          completionState: 'interrupted',
+          errorSurfaced: true
+        }
+      })
+    });
+
+    const assertions = await fetch(
+      base + '/__harness__/assertions?scenario=' + scenario
+    ).then(item => item.json());
+    assert.equal(assertions.ok, true);
+    assert.equal(assertions.scenarioChecks.publicFlashModelNotAgent, true);
+    assert.equal(
+      assertions.scenarioChecks.rasterBytesMatchDeclaredMime,
+      true
+    );
+    assert.equal(
+      assertions.scenarioChecks.appClassifiedFailureAsInterrupted,
+      true
+    );
+    assert.equal(assertions.scenarioChecks.notUserStop, true);
+    assert.equal(assertions.counts.cancelRequests, 0);
+  });
+});
+
+test('source contract extracts errors[] and reserves stopped state for cancelled status', async () => {
+  const source = await fs.readFile(
+    new URL('../../src/math-app.html', import.meta.url),
+    'utf8'
+  );
+  assert.match(
+    source,
+    /const DEFAULT_MODEL = "gemini-3\.7-flash";/
+  );
+  assert.doesNotMatch(
+    source,
+    /const DEFAULT_MODEL = "[^"]*-agent";/
+  );
+  const match = source.match(
+    /function terminalInteractionError\(interaction\) \{[\s\S]*?\n  \}\n\n  function isEligibleTerminalFallback/
+  );
+  assert.ok(match, 'terminalInteractionError must remain discoverable');
+  const functionSource = match[0].replace(
+    /\n\n  function isEligibleTerminalFallback$/,
+    ''
+  );
+  const terminalInteractionError = Function(
+    '"use strict"; return (' + functionSource + ');'
+  )();
+  const interaction = {
+    status: 'failed',
+    errors: [
+      {
+        code: 400,
+        message:
+          'Image input modality is not enabled for models/gemini-3.7-flash-agent'
+      }
+    ]
+  };
+  const error = terminalInteractionError(interaction);
+  assert.equal(error.status, 400);
+  assert.match(error.message, /Image input modality is not enabled/);
+  assert.equal(error.terminalInteraction, interaction);
+
+  assert.match(
+    source,
+    /if \(terminalStatus === "cancelled"\) \{\s*return finalizeStoppedJob\(\);\s*\}/
+  );
+  assert.match(
+    source,
+    /const terminalError = terminalInteractionError\(terminal\);/
+  );
+  assert.doesNotMatch(
+    source,
+    /terminalStatus === "failed"[\s\S]{0,180}finalizeStoppedJob\(\)/
+  );
 });
 
 test('request diagnostics fail closed if Api-Revision is ever introduced', async () => {

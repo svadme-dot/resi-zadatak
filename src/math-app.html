@@ -2561,32 +2561,32 @@ window.MathJax = {
     <div class="apiSlots">
       <div class="apiSlot">
         <div class="apiSlotHead"><strong>API ključ 1</strong><span>primarni</span></div>
-        <input id="googleModel1" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
+        <input id="googleModel1" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.7-flash" readonly aria-readonly="true">
         <input id="googleKey1" class="field" type="password" autocomplete="off" placeholder="API ključ 1">
       </div>
 
       <div class="apiSlot">
         <div class="apiSlotHead"><strong>API ključ 2</strong><span>rezerva</span></div>
-        <input id="googleModel2" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
+        <input id="googleModel2" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.7-flash" readonly aria-readonly="true">
         <input id="googleKey2" class="field" type="password" autocomplete="off" placeholder="API ključ 2">
       </div>
 
       <div class="apiSlot">
         <div class="apiSlotHead"><strong>API ključ 3</strong><span>rezerva</span></div>
-        <input id="googleModel3" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
+        <input id="googleModel3" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.7-flash" readonly aria-readonly="true">
         <input id="googleKey3" class="field" type="password" autocomplete="off" placeholder="API ključ 3">
       </div>
 
       <div class="apiSlot">
         <div class="apiSlotHead"><strong>API ključ 4</strong><span>poslednja rezerva</span></div>
-        <input id="googleModel4" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
+        <input id="googleModel4" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.7-flash" readonly aria-readonly="true">
         <input id="googleKey4" class="field" type="password" autocomplete="off" placeholder="API ključ 4">
       </div>
     </div>
 
     <button id="saveKey" class="primary">Sačuvaj API ključeve</button>
     <p class="note">
-      Sva četiri slota koriste fiksno <b>Gemini 3.6 Flash</b>; razlikuju se samo API ključevi.
+      Sva četiri slota koriste fiksno <b>Gemini 3.7 Flash</b>; razlikuju se samo API ključevi.
       Ključevi se čuvaju samo lokalno u <b>localStorage</b>.
     </p>
   </div>
@@ -2596,7 +2596,7 @@ window.MathJax = {
 (() => {
   "use strict";
 
-  const DEFAULT_MODEL = "gemini-3.6-flash";
+  const DEFAULT_MODEL = "gemini-3.7-flash";
   const API_INTERACTIONS_URL =
     "https://generativelanguage.googleapis.com/v1beta/interactions";
 
@@ -7190,7 +7190,15 @@ window.MathJax = {
           );
         }
         assertActiveJobOwnership(job.localJobId);
-        markCompletedInteraction(terminal.id || job.interactionId, profileId);
+        // Posao započet pre promene fiksnog modela i dalje sme da se dovrši
+        // preko istog ID-a/ključa, ali njegov 3.6 kontekst ne sme da se lažno
+        // označi kao 3.7 i prosledi sledećem turn-u. Tada koristimo lokalni
+        // stateless kontekst umesto cross-model previous_interaction_id veze.
+        const reusableProfileId = job.profileId === profileId ? profileId : "";
+        markCompletedInteraction(
+          terminal.id || job.interactionId,
+          reusableProfileId
+        );
         const solvedChatId = activeChatId;
         finishLiveModel();
         maybeGenerateChatTitle(solvedChatId);

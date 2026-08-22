@@ -22,7 +22,8 @@ const VALID_SCENARIOS = new Set([
   'stop-before-create',
   'ambiguous-create',
   'cross-tab-create',
-  'lease-fence-loss'
+  'lease-fence-loss',
+  'image-modality-error'
 ]);
 const BACKGROUND_SCENARIOS = new Set([
   'background-reload',
@@ -32,7 +33,8 @@ const BACKGROUND_SCENARIOS = new Set([
   'stop-before-create',
   'ambiguous-create',
   'cross-tab-create',
-  'lease-fence-loss'
+  'lease-fence-loss',
+  'image-modality-error'
 ]);
 
 const MIME_TYPES = new Map([
@@ -117,6 +119,29 @@ function isBase64(value) {
   }
 }
 
+function decodedImageMatchesMime(image) {
+  if (!image || !isBase64(image.data)) return false;
+  const bytes = Buffer.from(image.data, 'base64');
+  const mime = String(image.mime_type || '').toLowerCase();
+  if (mime === 'image/png') {
+    return (
+      bytes.length >= 8 &&
+      bytes.subarray(0, 8).equals(
+        Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+      )
+    );
+  }
+  if (mime === 'image/jpeg' || mime === 'image/jpg') {
+    return (
+      bytes.length >= 3 &&
+      bytes[0] === 0xff &&
+      bytes[1] === 0xd8 &&
+      bytes[2] === 0xff
+    );
+  }
+  return false;
+}
+
 function findForbiddenSearchConfig(value, currentPath = '$', matches = []) {
   if (Array.isArray(value)) {
     value.forEach((item, index) =>
@@ -159,7 +184,7 @@ function evaluateCreateRequest(record) {
   const forbidden = findForbiddenSearchConfig(body);
   const checks = {
     model:
-      body.model === 'gemini-3.6-flash',
+      body.model === 'gemini-3.7-flash',
     thinkingLevel:
       body.generation_config?.thinking_level === 'high',
     thinkingSummaries:
@@ -448,6 +473,42 @@ function evaluateRequests(requestLog, options = {}) {
       relevant.every(record => record.apiSlot !== 2);
   }
 
+  if (scenario === 'image-modality-error') {
+    const create = createRecords[0];
+    const image = findImagePart(create?.body);
+    const terminalGet = retrieveRecords.find(
+      record =>
+        record.kind === 'retrieve-canonical' &&
+        record.response?.outcome === 'failed'
+    );
+    const uiClassification = relevantClients.find(
+      record => record.event === 'terminal-classification'
+    );
+    scenarioChecks.exactlyOneBackgroundCreate = createRecords.length === 1;
+    scenarioChecks.publicFlashModelNotAgent =
+      create?.body?.model === 'gemini-3.7-flash' &&
+      !String(create?.body?.model || '').includes('-agent');
+    scenarioChecks.rasterBytesMatchDeclaredMime =
+      decodedImageMatchesMime(image);
+    scenarioChecks.googleErrorsArrayWasCanonicalFailure =
+      terminalGet?.response?.interactionStatus === 'failed' &&
+      terminalGet?.response?.terminalErrors?.some(error =>
+        /Image input modality is not enabled for models\/gemini-3\.7-flash-agent/i.test(
+          String(error?.message || '')
+        )
+      );
+    scenarioChecks.appClassifiedFailureAsInterrupted =
+      uiClassification?.detail?.completionState === 'interrupted';
+    scenarioChecks.errorMessageSurfaced =
+      uiClassification?.detail?.errorSurfaced === true;
+    scenarioChecks.notUserStop =
+      Boolean(uiClassification) &&
+      uiClassification?.detail?.completionState !== 'stopped' &&
+      cancelRecords.length === 0;
+    scenarioChecks.noApi2 =
+      relevant.every(record => record.apiSlot !== 2);
+  }
+
   const hasSolverRequest = createRecords.length > 0;
   const requestsOk =
     hasSolverRequest &&
@@ -483,7 +544,7 @@ function evaluateRequests(requestLog, options = {}) {
 function completedInteraction(id) {
   return {
     id,
-    model: 'gemini-3.6-flash',
+    model: 'gemini-3.7-flash',
     object: 'interaction',
     status: 'completed',
     steps: [
@@ -514,7 +575,7 @@ function completedInteraction(id) {
 function partialInteraction(id, status = 'in_progress') {
   return {
     id,
-    model: 'gemini-3.6-flash',
+    model: 'gemini-3.7-flash',
     object: 'interaction',
     status,
     steps: [
@@ -543,9 +604,25 @@ function partialInteraction(id, status = 'in_progress') {
 function sparseInteraction(id, status) {
   return {
     id,
-    model: 'gemini-3.6-flash',
+    model: 'gemini-3.7-flash',
     object: 'interaction',
     status
+  };
+}
+
+function failedImageModalityInteraction(id) {
+  return {
+    id,
+    model: 'gemini-3.7-flash',
+    object: 'interaction',
+    status: 'failed',
+    errors: [
+      {
+        code: 400,
+        message:
+          'Image input modality is not enabled for models/gemini-3.7-flash-agent'
+      }
+    ]
   };
 }
 
@@ -554,6 +631,22 @@ function backgroundEventId(job, ordinal) {
 }
 
 function backgroundEvents(job) {
+  if (job.scenario === 'image-modality-error') {
+    return [
+      {
+        event_id: backgroundEventId(job, 1),
+        event_type: 'interaction.created',
+        interaction: sparseInteraction(job.id, 'in_progress')
+      },
+      {
+        event_id: backgroundEventId(job, 2),
+        event_type: 'interaction.completed',
+        // Intentionally sparse: the app must canonical-GET errors[].
+        interaction: sparseInteraction(job.id, 'failed')
+      }
+    ];
+  }
+
   return [
     {
       event_id: backgroundEventId(job, 1),
@@ -997,7 +1090,10 @@ function streamBackgroundInteraction(res, record, job) {
         // That is a successful handoff, not a viewer failure.
         record.response.closedAfterTerminal = true;
         record.response.closedEarly = false;
-        record.response.outcome = 'completed-sparse';
+        record.response.outcome =
+          record.response.interactionStatus === 'completed'
+            ? 'completed-sparse'
+            : record.response.interactionStatus + '-sparse';
       } else {
         record.response.closedEarly = true;
         record.response.outcome = 'client-aborted';
@@ -1023,10 +1119,13 @@ function streamBackgroundInteraction(res, record, job) {
       return;
     }
 
-    job.status = 'completed';
+    const terminalStatus = record.response.terminalEventSent
+      ? String(record.response.interactionStatus || 'completed')
+      : 'completed';
+    job.status = terminalStatus;
     job.completedAt = new Date().toISOString();
-    record.response.outcome = 'completed';
-    record.response.interactionStatus = 'completed';
+    record.response.outcome = terminalStatus;
+    record.response.interactionStatus = terminalStatus;
     res.write('data: [DONE]\n\n');
     res.end();
   };
@@ -1051,11 +1150,9 @@ function streamBackgroundInteraction(res, record, job) {
       record.response.outcome =
         terminalStatus === 'completed'
           ? 'completed-sparse'
-          : terminalStatus;
-      if (terminalStatus === 'completed') {
-        job.status = 'completed';
-        job.completedAt = new Date().toISOString();
-      }
+          : terminalStatus + '-sparse';
+      job.status = terminalStatus;
+      job.completedAt = new Date().toISOString();
     }
 
     if (
@@ -1086,7 +1183,7 @@ function harnessBootstrap() {
     '    "success", "slow", "fallback-429",',
     '    "background-reload", "background-stop", "viewer-disconnect",',
     '    "rapid-double-send", "stop-before-create", "ambiguous-create",',
-    '    "cross-tab-create", "lease-fence-loss"',
+    '    "cross-tab-create", "lease-fence-loss", "image-modality-error"',
     '  ];',
     '  var scenario = params.get("scenario") || "success";',
     '  if (allowed.indexOf(scenario) === -1) scenario = "success";',
@@ -1105,12 +1202,12 @@ function harnessBootstrap() {
     '    sessionStorage.setItem(freshKey, "1");',
     '  }',
     '  var profiles = [',
-    '    { key: "e2e-api-1", model: "gemini-3.6-flash" },',
+    '    { key: "e2e-api-1", model: "gemini-3.7-flash" },',
     '    (scenario === "fallback-429" || scenario === "ambiguous-create")',
-    '      ? { key: "e2e-api-2", model: "gemini-3.6-flash" }',
-    '      : { key: "", model: "gemini-3.6-flash" },',
-    '    { key: "", model: "gemini-3.6-flash" },',
-    '    { key: "", model: "gemini-3.6-flash" }',
+    '      ? { key: "e2e-api-2", model: "gemini-3.7-flash" }',
+    '      : { key: "", model: "gemini-3.7-flash" },',
+    '    { key: "", model: "gemini-3.7-flash" },',
+    '    { key: "", model: "gemini-3.7-flash" }',
     '  ];',
     '  localStorage.setItem(',
     '    "matematika_google_api_profiles_v1",',
@@ -1180,6 +1277,35 @@ function harnessBootstrap() {
     '    assertions: "/__harness__/assertions?scenario=" + encodeURIComponent(scenario)',
     '  };',
     '  markClient("loaded", { fresh: params.get("fresh") !== "0" });',
+    '  if (scenario === "image-modality-error") {',
+    '    var terminalPolls = 0;',
+    '    var terminalTimer = setInterval(function () {',
+    '      terminalPolls += 1;',
+    '      var chats = [];',
+    '      try {',
+    '        chats = JSON.parse(localStorage.getItem("gemini_mobile_chats_v1") || "[]");',
+    '      } catch (_) {}',
+    '      var models = [];',
+    '      chats.forEach(function (chat) {',
+    '        (Array.isArray(chat && chat.messages) ? chat.messages : []).forEach(function (message) {',
+    '          if (message && message.role === "model") models.push(message);',
+    '        });',
+    '      });',
+    '      var terminal = models.slice().reverse().find(function (message) {',
+    '        return ["completed", "stopped", "interrupted"].indexOf(message.completionState) !== -1;',
+    '      });',
+    '      if (terminal) {',
+    '        clearInterval(terminalTimer);',
+    '        markClient("terminal-classification", {',
+    '          completionState: String(terminal.completionState || ""),',
+    '          errorSurfaced: /Image input modality is not enabled/i.test(String(terminal.text || ""))',
+    '        });',
+    '      } else if (terminalPolls >= 300) {',
+    '        clearInterval(terminalTimer);',
+    '        markClient("terminal-classification-timeout", null);',
+    '      }',
+    '    }, 100);',
+    '  }',
     '  console.info("[Math E2E harness]", window.__MATH_E2E__);',
     '})();',
     '</script>'
@@ -1247,6 +1373,7 @@ function dashboardHtml(host, port) {
     '<li><a href="' + base + '/docs/?scenario=ambiguous-create&run=ambiguous-shared&fresh=1">Accepted create with lost transport outcome</a></li>',
     '<li>Cross-tab create gate: <a href="' + base + '/docs/?scenario=cross-tab-create&run=cross-tab-shared&fresh=1">open tab A first</a>, then <a href="' + base + '/docs/?scenario=cross-tab-create&run=cross-tab-shared&fresh=0" target="_blank">open tab B</a></li>',
     '<li>Fence loss: <a href="' + base + '/docs/?scenario=lease-fence-loss&run=fence-shared&fresh=1">open owner tab first</a>, then <a href="' + base + '/docs/?scenario=lease-fence-loss&run=fence-shared&fresh=0" target="_blank">open takeover tab</a></li>',
+    '<li><a href="' + base + '/docs/?scenario=image-modality-error&run=image-modality-error&fresh=1">PNG create, then Google image-modality terminal error</a></li>',
     '</ul></div>',
     '<div class="card"><h2>Evidence</h2><ul>',
     '<li><a href="/__harness__/requests">Recorded request JSON</a></li>',
@@ -1264,6 +1391,7 @@ function dashboardHtml(host, port) {
     '<li><a href="/__harness__/assertions?scenario=ambiguous-create">Ambiguous-create assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=cross-tab-create">Cross-tab create-gate assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=lease-fence-loss">Fence-loss assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=image-modality-error">Image-modality error assertions</a></li>',
     '<li><a href="/__harness__/reset">Reset recorded evidence</a></li>',
     '<li><a href="/tests/e2e/fixtures/linear-equation.png">Synthetic math image (PNG)</a></li>',
     '</ul></div>',
@@ -1661,6 +1789,11 @@ export function createHarnessServer() {
 
         if (job.status === 'cancelled') {
           interaction = partialInteraction(interactionId, 'cancelled');
+        } else if (
+          job.status === 'failed' &&
+          job.scenario === 'image-modality-error'
+        ) {
+          interaction = failedImageModalityInteraction(interactionId);
         } else if (job.status === 'completed') {
           interaction = completedInteraction(interactionId);
         } else if (
@@ -1688,11 +1821,19 @@ export function createHarnessServer() {
               ? 'completed'
               : interaction.status === 'cancelled'
                 ? 'cancelled'
-                : 'in-progress',
+                : interaction.status === 'failed'
+                  ? 'failed'
+                  : 'in-progress',
           interactionStatus: interaction.status,
           partialOutputRetained:
             job.partialDelivered &&
             Array.isArray(interaction.steps),
+          terminalErrors: Array.isArray(interaction.errors)
+            ? interaction.errors.map(error => ({
+                code: Number(error?.code || 0),
+                message: String(error?.message || '')
+              }))
+            : [],
           eventsSent: 0,
           closedEarly: false
         };
@@ -1808,6 +1949,7 @@ if (isMain) {
         'CrossTabB: http://' + host + ':' + actualPort + '/docs/?scenario=cross-tab-create&run=cross-tab-shared&fresh=0',
         'FenceA:    http://' + host + ':' + actualPort + '/docs/?scenario=lease-fence-loss&run=fence-shared&fresh=1',
         'FenceB:    http://' + host + ':' + actualPort + '/docs/?scenario=lease-fence-loss&run=fence-shared&fresh=0',
+        'ImageError: http://' + host + ':' + actualPort + '/docs/?scenario=image-modality-error&run=image-modality-error&fresh=1',
         'Fixture:   ' + path.join(FIXTURES_DIR, 'linear-equation.png'),
         ''
       ].join('\n')

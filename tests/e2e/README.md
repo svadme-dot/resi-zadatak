@@ -129,11 +129,25 @@ bootstrap supplies fake local API slots automatically. The PNG is reproducible:
     - The old owner must abort its viewer, make no second create/API2 request,
       and must not canonical-finalize or clear the shared pending job.
 
+12. PNG image-modality terminal error
+    - Reset evidence and open PNG create, then Google image-modality terminal
+      error. Upload fixtures/linear-equation.png and send it normally.
+    - The mock accepts the background create and returns its ID. Its sparse SSE
+      terminal event says failed; canonical GET then returns Google's observed
+      errors[] shape with `Image input modality is not enabled for
+      models/gemini-3.7-flash-agent`.
+    - The request assertion requires the public model name
+      gemini-3.7-flash—not the internal `-agent` name—and verifies that decoded
+      PNG/JPEG bytes match the declared image MIME type.
+    - The injected observer reads the app's persisted model message. Assertions
+      pass only if the error text is visible and completionState is interrupted,
+      never stopped; no cancel POST and no API 2 are allowed.
+
 The Recorded request JSON view preserves each received body and response
 outcome. It records only the synthetic API slot number, never the API-key
 header value. Create-request assertions verify:
 
-- model is gemini-3.6-flash
+- model is gemini-3.7-flash
 - thinking_level is high
 - thinking_summaries is auto
 - tools contains exactly one code_execution tool

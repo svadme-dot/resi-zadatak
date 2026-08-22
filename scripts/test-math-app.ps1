@@ -25,6 +25,16 @@ Assert-True ($requestStart -ge 0 -and $requestEnd -gt $requestStart) `
   "buildInteractionRequest nije pronađen"
 $request = $source.Substring($requestStart, $requestEnd - $requestStart)
 
+Assert-True ($source -match 'const DEFAULT_MODEL\s*=\s*"gemini-3\.7-flash"') `
+  "fiksni model mora biti Gemini 3.7 Flash"
+Assert-True ((Count-Matches $source 'value="gemini-3\.7-flash"') -eq 4) `
+  "sva četiri UI polja moraju prikazivati Gemini 3.7 Flash"
+Assert-True ($source -match '<b>Gemini 3\.7 Flash</b>') `
+  "napomena u UI-u mora prikazivati Gemini 3.7 Flash"
+Assert-True ($source -notmatch 'gemini-3\.6-flash(?:-agent)?') `
+  "izvor ne sme vratiti nekompatibilni Gemini 3.6 Flash/agent model"
+Assert-True ($source -notmatch '(?i)Gemini 3\.6') `
+  "nijedan UI tekst ne sme ostati na Gemini 3.6"
 Assert-True ($request -match 'model:\s*DEFAULT_MODEL') `
   "glavni zahtev mora koristiti fiksni DEFAULT_MODEL"
 Assert-True ((Count-Matches $request 'type:\s*"code_execution"') -eq 1) `
@@ -135,6 +145,8 @@ Assert-True ($source -match 'Date\.now\(\) - liveModel\.totalStartedAtWallClock'
   "ukupno vreme mora koristiti wall clock preko reload-a"
 Assert-True ($source -match 'clientTurnId:\s*terminalTurnId') `
   "terminalna poruka mora imati stabilan turn ID za idempotentni upsert"
+Assert-True ($source -match 'reusableProfileId\s*=\s*job\.profileId\s*===\s*profileId\s*\?\s*profileId\s*:\s*""') `
+  "stari pending model ne sme postati cross-model previous_interaction_id"
 Assert-True ($source -match 'GLOBAL_JOB_LEASE_STORAGE\s*=\s*"matematika_background_global_lease_v2"') `
   "svi tabovi moraju deliti jedan app-wide lease"
 Assert-True ($source -match 'GLOBAL_JOB_LOCK_NAME\s*=\s*"matematika-background-create-gate-v2"') `
@@ -235,12 +247,12 @@ Assert-True ($source -match 'buildInteractionRequest\([\s\S]{0,240}job\.localJob
 
 Assert-True ($loader -notmatch 'window\.fetch\s*=|AbortSignal\.timeout|realSetTimeout') `
   "loader više ne sme sadržati Stop monkeypatch"
-Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=9') -eq 9) `
-  "loader mora koristiti svih 9 chunk URL-ova sa v=9"
-Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v15"') `
-  "service worker cache mora biti v15"
-Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=9') -eq 9) `
-  "service worker mora keširati svih 9 chunk URL-ova sa v=9"
+Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=10') -eq 9) `
+  "loader mora koristiti svih 9 chunk URL-ova sa v=10"
+Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v16"') `
+  "service worker cache mora biti v16"
+Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=10') -eq 9) `
+  "service worker mora keširati svih 9 chunk URL-ova sa v=10"
 
 & (Join-Path $PSScriptRoot "build-math-app.ps1") -CheckOnly | Out-Null
 Write-Output "Sve statičke provere matematičke aplikacije su prošle."
