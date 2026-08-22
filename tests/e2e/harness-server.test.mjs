@@ -5,14 +5,31 @@ import { createHarnessServer } from './harness-server.mjs';
 
 const RETRY_PROMPT =
   'E2E ponovni pokušaj: reši jednačinu 2x + 3 = 11.';
+const PRIMARY_MODEL = 'gemini-3.7-flash';
+const FALLBACK_MODEL = 'gemini-3.6-flash';
+const IMAGE_MODALITY_MESSAGE =
+  'Image input modality is not enabled for models/gemini-3.7-flash-agent';
+const UNSUPPORTED_IMAGE_PAYLOAD_MESSAGE =
+  'Unsupported image format/MIME';
+const EXPECTED_EIGHT_PROFILE_ORDER = [
+  ['e2e-api-1', PRIMARY_MODEL],
+  ['e2e-api-2', PRIMARY_MODEL],
+  ['e2e-api-3', PRIMARY_MODEL],
+  ['e2e-api-4', PRIMARY_MODEL],
+  ['e2e-api-1', FALLBACK_MODEL],
+  ['e2e-api-2', FALLBACK_MODEL],
+  ['e2e-api-3', FALLBACK_MODEL],
+  ['e2e-api-4', FALLBACK_MODEL]
+];
 
 const validSolverBody = {
-  model: 'gemini-3.6-flash',
+  model: PRIMARY_MODEL,
   input: [
     {
       type: 'image',
       mime_type: 'image/jpeg',
-      data: Buffer.from('synthetic math image').toString('base64')
+      data: Buffer.from('synthetic math image').toString('base64'),
+      resolution: 'high'
     },
     {
       type: 'text',
@@ -39,7 +56,8 @@ async function retrySolverBody() {
       {
         type: 'image',
         mime_type: 'image/png',
-        data: png.toString('base64')
+        data: png.toString('base64'),
+        resolution: 'high'
       },
       {
         type: 'text',
@@ -107,6 +125,13 @@ async function postSolver(base, endpoint, body, apiKey, signal) {
     body: JSON.stringify(body),
     signal
   });
+}
+
+function solverBodyForModel(model) {
+  return {
+    ...validSolverBody,
+    model
+  };
 }
 
 async function withServer(run) {
@@ -191,6 +216,39 @@ test('success SSE emits thought, model output, and completion', async () => {
   });
 });
 
+test('request oracle rejects an agent alias and media_resolution impostor', async () => {
+  await withServer(async base => {
+    const invalidBody = {
+      ...validSolverBody,
+      model: 'gemini-3.7-flash-agent',
+      input: validSolverBody.input.map(part =>
+        part.type === 'image'
+          ? {
+              type: part.type,
+              mime_type: part.mime_type,
+              data: part.data,
+              media_resolution: 'high'
+            }
+          : { ...part }
+      )
+    };
+    const response = await postSolver(
+      base,
+      '/__mock/gemini/v1beta/interactions?alt=sse&scenario=success',
+      invalidBody,
+      'e2e-api-1'
+    );
+    await response.text();
+
+    const assertions = await fetch(
+      base + '/__harness__/assertions?scenario=success'
+    ).then(item => item.json());
+    assert.equal(assertions.ok, false);
+    assert.equal(assertions.requests[0].checks.model, false);
+    assert.equal(assertions.requests[0].checks.imageResolutionHigh, false);
+  });
+});
+
 test('fallback scenario keeps API 1 at 429 and lets API 2 stream', async () => {
   await withServer(async base => {
     const endpoint =
@@ -226,6 +284,285 @@ test('fallback scenario keeps API 1 at 429 and lets API 2 stream', async () => {
     assert.equal(assertions.ok, true);
     assert.equal(assertions.scenarioChecks.api1Returned429, true);
     assert.equal(assertions.scenarioChecks.api2Completed, true);
+  });
+});
+
+test('fallback follows the exact four-key 3.7 then four-key 3.6 order', async () => {
+  await withServer(async base => {
+    const run = 'eight-profile-order';
+    const endpoint =
+      '/__mock/gemini/v1beta/interactions?alt=sse' +
+      '&scenario=fallback-eight&run=' + run;
+
+    for (let index = 0; index < EXPECTED_EIGHT_PROFILE_ORDER.length; index++) {
+      const [apiKey, model] = EXPECTED_EIGHT_PROFILE_ORDER[index];
+      const response = await postSolver(
+        base,
+        endpoint,
+        solverBodyForModel(model),
+        apiKey
+      );
+
+      if (index < 7) {
+        assert.equal(response.status, 401);
+      } else {
+        assert.equal(response.status, 200);
+        assert.match(await response.text(), /interaction\.completed/);
+      }
+    }
+
+    const assertions = await fetch(
+      base +
+        '/__harness__/assertions?scenario=fallback-eight&run=' +
+        run
+    ).then(item => item.json());
+
+    assert.equal(assertions.ok, true);
+    assert.deepEqual(assertions.scenarioChecks, {
+      exactEightProfileOrder: true,
+      firstSevenWereClassifiedFailures: true,
+      eighthProfileCompleted: true
+    });
+    assert.equal(assertions.counts.solverRequests, 8);
+    assert.equal(
+      assertions.requests.every(request =>
+        request.checks.model &&
+        request.checks.thinkingLevel &&
+        request.checks.thinkingSummaries &&
+        request.checks.toolsExactlyCodeExecution &&
+        request.checks.noGoogleSearchOrGrounding &&
+        request.checks.imagePayload &&
+        request.checks.imageResolutionHigh
+      ),
+      true
+    );
+  });
+});
+
+test('single-line SSE modality error advances to the next ordered tuple', async () => {
+  await withServer(async base => {
+    const run = 'single-line-modality-error';
+    const endpoint =
+      '/__mock/gemini/v1beta/interactions?alt=sse' +
+      '&scenario=sse-error-next-profile&run=' + run;
+    const first = await postSolver(
+      base,
+      endpoint,
+      solverBodyForModel(PRIMARY_MODEL),
+      'e2e-api-1'
+    );
+    assert.equal(first.status, 200);
+    const wire = await first.text();
+    const nonEmptyLines = wire.split(/\r?\n/).filter(Boolean);
+    assert.equal(nonEmptyLines.length, 1);
+    assert.match(nonEmptyLines[0], /"event_type":"error"/);
+    assert.match(nonEmptyLines[0], new RegExp(IMAGE_MODALITY_MESSAGE));
+
+    const second = await postSolver(
+      base,
+      endpoint,
+      solverBodyForModel(PRIMARY_MODEL),
+      'e2e-api-2'
+    );
+    assert.equal(second.status, 200);
+    assert.match(await second.text(), /interaction\.completed/);
+
+    const assertions = await fetch(
+      base +
+        '/__harness__/assertions?scenario=sse-error-next-profile&run=' +
+        run
+    ).then(item => item.json());
+    assert.equal(assertions.ok, true);
+    assert.deepEqual(assertions.scenarioChecks, {
+      singleLineSseErrorWasSurfaced: true,
+      advancedToNextOrderedTuple: true,
+      noSyncDuplicateForSseError: true
+    });
+    assert.equal(assertions.counts.solverRequests, 2);
+  });
+});
+
+test('failed interaction completion advances without a sync duplicate', async () => {
+  await withServer(async (base, harness) => {
+    const run = 'terminal-failed-modality';
+    const endpoint =
+      '/__mock/gemini/v1beta/interactions?alt=sse' +
+      '&scenario=terminal-failed-next-profile&run=' + run;
+    const first = await postSolver(
+      base,
+      endpoint,
+      solverBodyForModel(PRIMARY_MODEL),
+      'e2e-api-1'
+    );
+    assert.equal(first.status, 200);
+    const wire = await first.text();
+    const firstDataLine = wire
+      .split(/\r?\n/)
+      .find(line => line.startsWith('data: {'));
+    assert.ok(firstDataLine);
+    const terminalEvent = JSON.parse(firstDataLine.slice(5).trim());
+    assert.equal(terminalEvent.event_type, 'interaction.completed');
+    assert.equal(terminalEvent.interaction.status, 'failed');
+    assert.equal(
+      terminalEvent.interaction.errors[0].message,
+      IMAGE_MODALITY_MESSAGE
+    );
+
+    const second = await postSolver(
+      base,
+      endpoint,
+      solverBodyForModel(PRIMARY_MODEL),
+      'e2e-api-2'
+    );
+    assert.equal(second.status, 200);
+    assert.match(await second.text(), /interaction\.completed/);
+
+    const assertions = await fetch(
+      base +
+        '/__harness__/assertions?scenario=terminal-failed-next-profile&run=' +
+        run
+    ).then(item => item.json());
+    assert.equal(assertions.ok, true);
+    assert.deepEqual(assertions.scenarioChecks, {
+      failedCompletionErrorsWereSurfaced: true,
+      failedCompletionAdvancedDirectly: true,
+      zeroSyncDuplicatesOnFailedTuple: true
+    });
+    assert.equal(assertions.counts.solverRequests, 2);
+    assert.equal(
+      harness.requestLog
+        .filter(record => record.run === run)
+        .some(record => record.body?.stream === false),
+      false
+    );
+  });
+});
+
+test('unsupported image format payload error never traverses profiles', async () => {
+  await withServer(async base => {
+    const run = 'unsupported-image-payload';
+    const endpoint =
+      '/__mock/gemini/v1beta/interactions?alt=sse' +
+      '&scenario=payload-error-no-fallback&run=' + run;
+    const first = await postSolver(
+      base,
+      endpoint,
+      solverBodyForModel(PRIMARY_MODEL),
+      'e2e-api-1'
+    );
+    assert.equal(first.status, 200);
+    assert.match(await first.text(), new RegExp(UNSUPPORTED_IMAGE_PAYLOAD_MESSAGE));
+
+    const assertionsUrl =
+      base +
+      '/__harness__/assertions?scenario=payload-error-no-fallback&run=' +
+      run;
+    const assertions = await fetch(assertionsUrl).then(item => item.json());
+    assert.equal(assertions.ok, true);
+    assert.deepEqual(assertions.scenarioChecks, {
+      payloadErrorWasSurfaced: true,
+      payloadErrorStoppedImmediately: true
+    });
+    assert.equal(assertions.counts.solverRequests, 1);
+
+    const forbiddenSecond = await postSolver(
+      base,
+      endpoint,
+      solverBodyForModel(PRIMARY_MODEL),
+      'e2e-api-2'
+    );
+    assert.equal(forbiddenSecond.status, 409);
+    const afterForbidden = await fetch(assertionsUrl).then(item => item.json());
+    assert.equal(afterForbidden.ok, false);
+    assert.equal(
+      afterForbidden.scenarioChecks.payloadErrorStoppedImmediately,
+      false
+    );
+  });
+});
+
+test('user Stop after partial output never continues to another profile', async () => {
+  await withServer(async base => {
+    const run = 'stop-no-continuation';
+    const endpoint =
+      '/__mock/gemini/v1beta/interactions?alt=sse' +
+      '&scenario=slow&run=' + run;
+    const controller = new AbortController();
+    const response = await postSolver(
+      base,
+      endpoint,
+      validSolverBody,
+      'e2e-api-1',
+      controller.signal
+    );
+    assert.equal(response.status, 200);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let received = '';
+    while (!received.includes('Oduzmemo 3 sa obe strane')) {
+      const chunk = await reader.read();
+      assert.equal(chunk.done, false);
+      received += decoder.decode(chunk.value, { stream: true });
+    }
+    controller.abort();
+    try { await reader.read(); } catch (_) {}
+    await new Promise(resolve => setTimeout(resolve, 40));
+
+    const assertions = await fetch(
+      base +
+        '/__harness__/assertions?scenario=slow&expectStop=1&run=' +
+        run
+    ).then(item => item.json());
+    assert.equal(assertions.ok, true);
+    assert.equal(assertions.scenarioChecks.clientAbortedSlowStream, true);
+    assert.equal(assertions.scenarioChecks.stopDidNotContinueProfiles, true);
+    assert.equal(assertions.counts.solverRequests, 1);
+  });
+});
+
+test('transport failure after partial output never continues profiles', async () => {
+  await withServer(async base => {
+    const run = 'partial-no-continuation';
+    const endpoint =
+      '/__mock/gemini/v1beta/interactions?alt=sse' +
+      '&scenario=partial-no-continue&run=' + run;
+    const response = await postSolver(
+      base,
+      endpoint,
+      validSolverBody,
+      'e2e-api-1'
+    );
+    assert.equal(response.status, 200);
+    await assert.rejects(response.text());
+    await new Promise(resolve => setTimeout(resolve, 40));
+
+    const assertionsUrl =
+      base +
+      '/__harness__/assertions?scenario=partial-no-continue&run=' +
+      run;
+    const assertions = await fetch(assertionsUrl).then(item => item.json());
+    assert.equal(assertions.ok, true);
+    assert.equal(assertions.scenarioChecks.partialOutputWasDelivered, true);
+    assert.equal(
+      assertions.scenarioChecks.partialOutputDidNotContinueProfiles,
+      true
+    );
+    assert.equal(assertions.counts.solverRequests, 1);
+
+    const unexpectedContinuation = await postSolver(
+      base,
+      endpoint,
+      solverBodyForModel(PRIMARY_MODEL),
+      'e2e-api-2'
+    );
+    assert.equal(unexpectedContinuation.status, 409);
+    const afterUnexpected = await fetch(assertionsUrl).then(item => item.json());
+    assert.equal(afterUnexpected.ok, false);
+    assert.equal(
+      afterUnexpected.scenarioChecks.partialOutputDidNotContinueProfiles,
+      false
+    );
   });
 });
 
@@ -348,7 +685,8 @@ test('reload retry oracle rejects changed prompt, image, or API 2', async () => 
         {
           type: 'image',
           mime_type: 'image/png',
-          data: Buffer.from('different image bytes').toString('base64')
+          data: Buffer.from('different image bytes').toString('base64'),
+          resolution: 'high'
         },
         { type: 'text', text: RETRY_PROMPT + ' promenjeno' }
       ]

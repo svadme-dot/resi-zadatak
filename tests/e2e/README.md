@@ -39,7 +39,8 @@ bootstrap supplies fake local API slots automatically. The PNG is reproducible:
    - Choose the synthetic image and send it.
    - Wait until part of the final answer is visible, then press Stop.
    - Confirm the already-rendered thought/answer remains visible.
-   - Open Stop/abort assertions. The top-level ok value must be true.
+   - Open Stop/abort assertions. The top-level ok value must be true, including
+     stopDidNotContinueProfiles; all four fake keys are configured deliberately.
 
 3. API fallback
    - Reset evidence and open API 1 returns 429, API 2 succeeds.
@@ -49,7 +50,36 @@ bootstrap supplies fake local API slots automatically. The PNG is reproducible:
    - Open Fallback assertions. The top-level ok value must be true, including
      api1Returned429, api2Completed, and api1WasBeforeApi2.
 
-4. Reload then retry an unanswered send
+4. Exact eight-profile fallback order
+   - Reset evidence and open Exact 8-profile fallback order.
+   - The first seven attempts receive classified 401 failures and the eighth
+     streams the successful answer.
+   - Open 8-profile order assertions. The exact request order must be API 1–4
+     on gemini-3.7-flash, followed by API 1–4 on gemini-3.6-flash.
+
+5. Partial output must not continue
+   - Reset evidence and open Partial output must not continue.
+   - The mock emits thought and answer text, then deliberately drops transport.
+   - Open Partial/no-continuation assertions. Exactly one request may exist;
+     neither another key nor the fallback model may be attempted.
+
+6. Single-line SSE modality error
+   - Open Single-line SSE modality error advances.
+   - API 1/3.7 receives the observed one-line `event_type:error`; API 2/3.7
+     must be the next and only succeeding tuple, with no sync duplicate.
+
+7. Failed terminal completion
+   - Open Failed completion advances without sync duplicate.
+   - API 1/3.7 receives `interaction.completed` with status `failed` and an
+     `errors[]` modality message. API 2/3.7 must follow directly; a
+     `stream:false` POST on API 1 is a failure.
+
+8. Unsupported image payload is not model fallback
+   - Open Unsupported image payload must stop.
+   - The generic `Unsupported image format/MIME` error must leave exactly one
+     API 1/3.7 request and must never traverse keys or models.
+
+9. Reload then retry an unanswered send
    - Reset evidence and open Reload then empty-Send retry (automatic).
    - The harness chooses the real PNG, enters its fixed test prompt, starts a
      request, and reloads while that first SSE connection is still unanswered.
@@ -70,9 +100,10 @@ beyond the same clicks and upload a user performs.
 The Recorded request JSON view preserves each received body and response
 outcome. Solver assertions verify:
 
-- model is gemini-3.6-flash
+- model is exactly gemini-3.7-flash or gemini-3.6-flash (never an agent alias)
 - thinking_level is high
 - thinking_summaries is auto
 - tools contains exactly one code_execution tool
 - no google_search or grounding configuration exists anywhere in the body
 - an image MIME type and non-empty base64 payload are present
+- the image content item carries resolution: high

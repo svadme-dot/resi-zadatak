@@ -11,10 +11,31 @@ const GEMINI_ORIGIN =
   'https://generativelanguage.googleapis.com/v1beta/interactions';
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 4173;
+const PRIMARY_MODEL = 'gemini-3.7-flash';
+const FALLBACK_MODEL = 'gemini-3.6-flash';
+const IMAGE_MODALITY_MESSAGE =
+  'Image input modality is not enabled for models/gemini-3.7-flash-agent';
+const UNSUPPORTED_IMAGE_PAYLOAD_MESSAGE =
+  'Unsupported image format/MIME';
+const EXPECTED_EIGHT_PROFILE_ORDER = [
+  ['e2e-api-1', PRIMARY_MODEL],
+  ['e2e-api-2', PRIMARY_MODEL],
+  ['e2e-api-3', PRIMARY_MODEL],
+  ['e2e-api-4', PRIMARY_MODEL],
+  ['e2e-api-1', FALLBACK_MODEL],
+  ['e2e-api-2', FALLBACK_MODEL],
+  ['e2e-api-3', FALLBACK_MODEL],
+  ['e2e-api-4', FALLBACK_MODEL]
+];
 const VALID_SCENARIOS = new Set([
   'success',
   'slow',
   'fallback-429',
+  'fallback-eight',
+  'partial-no-continue',
+  'sse-error-next-profile',
+  'terminal-failed-next-profile',
+  'payload-error-no-fallback',
   'retry-after-reload'
 ]);
 const RETRY_PROMPT =
@@ -145,7 +166,7 @@ function evaluateSolverRequest(record) {
   const forbidden = findForbiddenSearchConfig(body);
   const checks = {
     model:
-      body.model === 'gemini-3.6-flash',
+      body.model === PRIMARY_MODEL || body.model === FALLBACK_MODEL,
     thinkingLevel:
       body.generation_config?.thinking_level === 'high',
     thinkingSummaries:
@@ -159,7 +180,9 @@ function evaluateSolverRequest(record) {
       forbidden.length === 0,
     imagePayload:
       image?.mime_type?.startsWith('image/') === true &&
-      isBase64(image?.data)
+      isBase64(image?.data),
+    imageResolutionHigh:
+      image?.resolution === 'high'
   };
 
   return {
@@ -217,12 +240,92 @@ function evaluateRequests(requestLog, options = {}) {
         Math.min(...api2.map(record => record.id));
   }
 
+  if (scenario === 'fallback-eight') {
+    const actualOrder = solverRecords.map(record => [
+      record.apiKey,
+      String(record.body?.model || '')
+    ]);
+    scenarioChecks.exactEightProfileOrder =
+      JSON.stringify(actualOrder) ===
+      JSON.stringify(EXPECTED_EIGHT_PROFILE_ORDER);
+    scenarioChecks.firstSevenWereClassifiedFailures =
+      solverRecords.length === 8 &&
+      solverRecords.slice(0, 7).every(record =>
+        record.response?.status === 401 &&
+        record.response?.outcome === 'classified-profile-failure'
+      );
+    scenarioChecks.eighthProfileCompleted =
+      solverRecords[7]?.response?.outcome === 'completed';
+  }
+
+  if (scenario === 'sse-error-next-profile') {
+    const actualOrder = solverRecords.map(record => [
+      record.apiKey,
+      String(record.body?.model || '')
+    ]);
+    scenarioChecks.singleLineSseErrorWasSurfaced =
+      solverRecords[0]?.response?.outcome === 'sse-error-modality' &&
+      solverRecords[0]?.response?.singleLine === true &&
+      solverRecords[0]?.response?.message === IMAGE_MODALITY_MESSAGE;
+    scenarioChecks.advancedToNextOrderedTuple =
+      JSON.stringify(actualOrder) === JSON.stringify([
+        ['e2e-api-1', PRIMARY_MODEL],
+        ['e2e-api-2', PRIMARY_MODEL]
+      ]) &&
+      solverRecords[1]?.response?.outcome === 'completed';
+    scenarioChecks.noSyncDuplicateForSseError =
+      !solverRecords.some(record => record.body?.stream === false);
+  }
+
+  if (scenario === 'terminal-failed-next-profile') {
+    const actualOrder = solverRecords.map(record => [
+      record.apiKey,
+      String(record.body?.model || '')
+    ]);
+    scenarioChecks.failedCompletionErrorsWereSurfaced =
+      solverRecords[0]?.response?.outcome === 'terminal-failed-modality' &&
+      solverRecords[0]?.response?.message === IMAGE_MODALITY_MESSAGE;
+    scenarioChecks.failedCompletionAdvancedDirectly =
+      JSON.stringify(actualOrder) === JSON.stringify([
+        ['e2e-api-1', PRIMARY_MODEL],
+        ['e2e-api-2', PRIMARY_MODEL]
+      ]) &&
+      solverRecords[1]?.response?.outcome === 'completed';
+    scenarioChecks.zeroSyncDuplicatesOnFailedTuple =
+      !solverRecords.some(record =>
+        record.apiKey === 'e2e-api-1' &&
+        record.body?.model === PRIMARY_MODEL &&
+        record.body?.stream === false
+      );
+  }
+
+  if (scenario === 'payload-error-no-fallback') {
+    scenarioChecks.payloadErrorWasSurfaced =
+      solverRecords[0]?.response?.outcome === 'payload-error' &&
+      solverRecords[0]?.response?.message ===
+        UNSUPPORTED_IMAGE_PAYLOAD_MESSAGE;
+    scenarioChecks.payloadErrorStoppedImmediately =
+      solverRecords.length === 1 &&
+      solverRecords[0]?.apiKey === 'e2e-api-1' &&
+      solverRecords[0]?.body?.model === PRIMARY_MODEL;
+  }
+
   if (scenario === 'slow' && options.expectStop) {
     scenarioChecks.clientAbortedSlowStream = solverRecords.some(
       record =>
         record.response?.closedEarly === true &&
         record.response?.eventsSent > 0
     );
+    scenarioChecks.stopDidNotContinueProfiles = solverRecords.length === 1;
+  }
+
+  if (scenario === 'partial-no-continue') {
+    scenarioChecks.partialOutputWasDelivered =
+      solverRecords[0]?.response?.outcome === 'server-disconnected-partial' &&
+      solverRecords[0]?.response?.partialOutput === true &&
+      Number(solverRecords[0]?.response?.eventsSent || 0) > 0;
+    scenarioChecks.partialOutputDidNotContinueProfiles =
+      solverRecords.length === 1;
   }
 
   if (scenario === 'retry-after-reload') {
@@ -550,12 +653,167 @@ function holdInteractionUntilReload(res, record) {
   });
 }
 
+function streamPartialThenDisconnect(res, record) {
+  const timers = new Set();
+  const interactionId =
+    'mock-partial-' + String(record.id).padStart(3, '0');
+  const events = [
+    [0, {
+      event_type: 'interaction.created',
+      interaction: { id: interactionId }
+    }],
+    [35, {
+      event_type: 'step.start',
+      index: 0,
+      step: { type: 'thought' }
+    }],
+    [75, {
+      event_type: 'step.delta',
+      index: 0,
+      delta: {
+        type: 'thought_summary',
+        content: [{
+          type: 'text',
+          text: 'Parcijalno razmišljanje je već prikazano. '
+        }]
+      }
+    }],
+    [115, {
+      event_type: 'step.start',
+      index: 1,
+      step: { type: 'model_output' }
+    }],
+    [155, {
+      event_type: 'step.delta',
+      index: 1,
+      delta: {
+        type: 'text',
+        text: 'Ovaj deo odgovora mora ostati bez prelaska na drugi profil.'
+      }
+    }]
+  ];
+
+  record.response = {
+    status: 200,
+    outcome: 'streaming-partial',
+    eventsSent: 0,
+    closedEarly: false,
+    partialOutput: false
+  };
+
+  res.writeHead(200, {
+    'Cache-Control': 'no-cache, no-store',
+    'Connection': 'keep-alive',
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'X-Accel-Buffering': 'no'
+  });
+  res.flushHeaders();
+  res.write(': deterministic partial stream\n\n');
+
+  const cleanup = () => {
+    for (const timer of timers) clearTimeout(timer);
+    timers.clear();
+  };
+
+  res.once('close', () => {
+    if (record.response.outcome === 'streaming-partial') {
+      record.response.closedEarly = true;
+      record.response.outcome = 'client-aborted-partial';
+    }
+    cleanup();
+  });
+
+  for (const [delay, event] of events) {
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      if (res.destroyed || res.writableEnded) return;
+      res.write('data: ' + JSON.stringify(event) + '\n\n');
+      record.response.eventsSent += 1;
+      if (event.event_type === 'step.delta' && event.index === 1) {
+        record.response.partialOutput = true;
+      }
+    }, delay);
+    timers.add(timer);
+  }
+
+  const disconnectTimer = setTimeout(() => {
+    timers.delete(disconnectTimer);
+    if (res.destroyed || res.writableEnded) return;
+    record.response.closedEarly = true;
+    record.response.outcome = 'server-disconnected-partial';
+    res.destroy();
+  }, 210);
+  timers.add(disconnectTimer);
+}
+
+function sendSingleLineSseError(res, record, message, outcome) {
+  const event = {
+    event_type: 'error',
+    error: {
+      code: 400,
+      status: 'INVALID_ARGUMENT',
+      message
+    }
+  };
+
+  record.response = {
+    status: 200,
+    outcome,
+    eventsSent: 1,
+    closedEarly: false,
+    singleLine: true,
+    message
+  };
+
+  res.writeHead(200, {
+    'Cache-Control': 'no-cache, no-store',
+    'Content-Type': 'text/event-stream; charset=utf-8'
+  });
+  // Deliberately no blank SSE separator: this reproduces the observed wire
+  // shape and exercises the parser's one-data-line fast path.
+  res.end('data: ' + JSON.stringify(event) + '\n');
+}
+
+function sendTerminalFailedCompletion(res, record) {
+  const event = {
+    event_type: 'interaction.completed',
+    interaction: {
+      id: 'mock-terminal-failed-' + String(record.id).padStart(3, '0'),
+      status: 'failed',
+      errors: [
+        {
+          code: 400,
+          status: 'INVALID_ARGUMENT',
+          message: IMAGE_MODALITY_MESSAGE
+        }
+      ]
+    }
+  };
+
+  record.response = {
+    status: 200,
+    outcome: 'terminal-failed-modality',
+    eventsSent: 1,
+    closedEarly: false,
+    message: IMAGE_MODALITY_MESSAGE
+  };
+
+  res.writeHead(200, {
+    'Cache-Control': 'no-cache, no-store',
+    'Content-Type': 'text/event-stream; charset=utf-8'
+  });
+  res.end(
+    'data: ' + JSON.stringify(event) + '\n\n' +
+    'data: [DONE]\n\n'
+  );
+}
+
 function harnessBootstrap() {
   const lines = [
     '<script id="math-e2e-bootstrap">',
     '(function () {',
     '  var params = new URLSearchParams(location.search);',
-    '  var allowed = ["success", "slow", "fallback-429", "retry-after-reload"];',
+    '  var allowed = ["success", "slow", "fallback-429", "fallback-eight", "partial-no-continue", "sse-error-next-profile", "terminal-failed-next-profile", "payload-error-no-fallback", "retry-after-reload"];',
     '  var scenario = params.get("scenario") || "success";',
     '  if (allowed.indexOf(scenario) === -1) scenario = "success";',
     '  var runId = params.get("run") || scenario;',
@@ -564,14 +822,14 @@ function harnessBootstrap() {
     '    localStorage.clear();',
     '    sessionStorage.setItem(freshKey, "1");',
     '  }',
-    '  var profiles = [',
-    '    { key: "e2e-api-1", model: "gemini-3.6-flash" },',
-    '    scenario === "fallback-429"',
-    '      ? { key: "e2e-api-2", model: "gemini-3.6-flash" }',
-    '      : { key: "", model: "gemini-3.6-flash" },',
-    '    { key: "", model: "gemini-3.6-flash" },',
-    '    { key: "", model: "gemini-3.6-flash" }',
-    '  ];',
+    '  var allKeys = ["slow", "fallback-eight", "partial-no-continue", "sse-error-next-profile", "terminal-failed-next-profile", "payload-error-no-fallback"].indexOf(scenario) !== -1;',
+    '  var configuredKeyCount = allKeys ? 4 : scenario === "fallback-429" ? 2 : 1;',
+    '  var profiles = [1, 2, 3, 4].map(function (slot) {',
+    '    return {',
+    '      key: slot <= configuredKeyCount ? "e2e-api-" + slot : "",',
+    '      model: "gemini-3.7-flash"',
+    '    };',
+    '  });',
     '  localStorage.setItem(',
     '    "matematika_google_api_profiles_v1",',
     '    JSON.stringify(profiles)',
@@ -668,6 +926,11 @@ function dashboardHtml(host, port) {
     '<li><a href="' + base + '/docs/?scenario=success&fresh=1">Success stream</a></li>',
     '<li><a href="' + base + '/docs/?scenario=slow&fresh=1">Slow stream for Stop</a></li>',
     '<li><a href="' + base + '/docs/?scenario=fallback-429&fresh=1">API 1 returns 429, API 2 succeeds</a></li>',
+    '<li><a href="' + base + '/docs/?scenario=fallback-eight&fresh=1">Exact 8-profile fallback order</a></li>',
+    '<li><a href="' + base + '/docs/?scenario=partial-no-continue&fresh=1">Partial output must not continue</a></li>',
+    '<li><a href="' + base + '/docs/?scenario=sse-error-next-profile&fresh=1">Single-line SSE modality error advances</a></li>',
+    '<li><a href="' + base + '/docs/?scenario=terminal-failed-next-profile&fresh=1">Failed completion advances without sync duplicate</a></li>',
+    '<li><a href="' + base + '/docs/?scenario=payload-error-no-fallback&fresh=1">Unsupported image payload must stop</a></li>',
     '<li><a href="' + base + '/docs/?scenario=retry-after-reload&fresh=1&run=' + retryRun + '">Reload then empty-Send retry (automatic)</a></li>',
     '</ul></div>',
     '<div class="card"><h2>Evidence</h2><ul>',
@@ -675,6 +938,11 @@ function dashboardHtml(host, port) {
     '<li><a href="/__harness__/assertions">All request assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=success">Success assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=fallback-429">Fallback assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=fallback-eight">8-profile order assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=partial-no-continue">Partial/no-continuation assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=sse-error-next-profile">SSE error propagation assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=terminal-failed-next-profile">Failed completion assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=payload-error-no-fallback">Payload classifier assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=slow&expectStop=1">Stop/abort assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=retry-after-reload&run=' + retryRun + '">Reload/retry assertions</a></li>',
     '<li><a href="/__harness__/reset">Reset recorded evidence</a></li>',
@@ -891,6 +1159,133 @@ export function createHarnessServer() {
           return;
         }
 
+        if (scenario === 'fallback-eight') {
+          const expected =
+            EXPECTED_EIGHT_PROFILE_ORDER[scenarioRequestIndex - 1];
+          const tupleMatches = Boolean(
+            expected &&
+            expected[0] === apiKey &&
+            expected[1] === body?.model
+          );
+
+          if (!tupleMatches) {
+            record.response = {
+              status: 409,
+              outcome: 'profile-order-mismatch',
+              eventsSent: 0,
+              closedEarly: false
+            };
+            sendJson(res, 409, {
+              error: {
+                code: 409,
+                status: 'FAILED_PRECONDITION',
+                message:
+                  'Deterministic mock: unexpected key/model profile order.'
+              }
+            });
+            return;
+          }
+
+          if (scenarioRequestIndex <= 7) {
+            record.response = {
+              status: 401,
+              outcome: 'classified-profile-failure',
+              eventsSent: 0,
+              closedEarly: false
+            };
+            sendJson(res, 401, {
+              error: {
+                code: 401,
+                status: 'UNAUTHENTICATED',
+                message:
+                  'Deterministic mock: classified profile failure; continue once.'
+              }
+            });
+            return;
+          }
+        }
+
+        if (
+          scenario === 'sse-error-next-profile' ||
+          scenario === 'terminal-failed-next-profile'
+        ) {
+          const expected = scenarioRequestIndex === 1
+            ? ['e2e-api-1', PRIMARY_MODEL]
+            : scenarioRequestIndex === 2
+              ? ['e2e-api-2', PRIMARY_MODEL]
+              : null;
+          const tupleMatches = Boolean(
+            expected &&
+            expected[0] === apiKey &&
+            expected[1] === body?.model
+          );
+
+          if (!tupleMatches) {
+            record.response = {
+              status: 409,
+              outcome: 'unexpected-modality-continuation',
+              eventsSent: 0,
+              closedEarly: false
+            };
+            sendJson(res, 409, {
+              error: {
+                code: 409,
+                status: 'FAILED_PRECONDITION',
+                message:
+                  'Deterministic mock: expected the next ordered tuple directly.'
+              }
+            });
+            return;
+          }
+
+          if (scenarioRequestIndex === 1) {
+            if (scenario === 'sse-error-next-profile') {
+              sendSingleLineSseError(
+                res,
+                record,
+                IMAGE_MODALITY_MESSAGE,
+                'sse-error-modality'
+              );
+            } else {
+              sendTerminalFailedCompletion(res, record);
+            }
+            return;
+          }
+        }
+
+        if (scenario === 'payload-error-no-fallback') {
+          const firstTuple =
+            scenarioRequestIndex === 1 &&
+            apiKey === 'e2e-api-1' &&
+            body?.model === PRIMARY_MODEL;
+
+          if (!firstTuple) {
+            record.response = {
+              status: 409,
+              outcome: 'unexpected-payload-error-fallback',
+              eventsSent: 0,
+              closedEarly: false
+            };
+            sendJson(res, 409, {
+              error: {
+                code: 409,
+                status: 'FAILED_PRECONDITION',
+                message:
+                  'Deterministic mock: payload errors must not traverse profiles.'
+              }
+            });
+            return;
+          }
+
+          sendSingleLineSseError(
+            res,
+            record,
+            UNSUPPORTED_IMAGE_PAYLOAD_MESSAGE,
+            'payload-error'
+          );
+          return;
+        }
+
         if (
           scenario === 'fallback-429' &&
           apiKey === 'e2e-api-1'
@@ -908,6 +1303,29 @@ export function createHarnessServer() {
               message: 'Deterministic mock: API 1 quota exhausted.'
             }
           });
+          return;
+        }
+
+        if (scenario === 'partial-no-continue') {
+          if (scenarioRequestIndex === 1) {
+            streamPartialThenDisconnect(res, record);
+          } else {
+            record.response = {
+              status: 409,
+              outcome: 'unexpected-continuation-after-partial',
+              eventsSent: 0,
+              closedEarly: false,
+              partialOutput: false
+            };
+            sendJson(res, 409, {
+              error: {
+                code: 409,
+                status: 'FAILED_PRECONDITION',
+                message:
+                  'Deterministic mock: partial output must stop all continuation.'
+              }
+            });
+          }
           return;
         }
 
@@ -1038,6 +1456,11 @@ if (isMain) {
         'Success:   http://' + host + ':' + actualPort + '/docs/?scenario=success&fresh=1',
         'Slow/Stop: http://' + host + ':' + actualPort + '/docs/?scenario=slow&fresh=1',
         'Fallback:  http://' + host + ':' + actualPort + '/docs/?scenario=fallback-429&fresh=1',
+        '8 profiles:http://' + host + ':' + actualPort + '/docs/?scenario=fallback-eight&fresh=1',
+        'Partial:   http://' + host + ':' + actualPort + '/docs/?scenario=partial-no-continue&fresh=1',
+        'SSE error: http://' + host + ':' + actualPort + '/docs/?scenario=sse-error-next-profile&fresh=1',
+        'Failed:    http://' + host + ':' + actualPort + '/docs/?scenario=terminal-failed-next-profile&fresh=1',
+        'Payload:   http://' + host + ':' + actualPort + '/docs/?scenario=payload-error-no-fallback&fresh=1',
         'Retry:     http://' + host + ':' + actualPort + '/docs/?scenario=retry-after-reload&fresh=1&run=retry-' + Date.now(),
         'Fixture:   ' + path.join(FIXTURES_DIR, 'linear-equation.png'),
         ''

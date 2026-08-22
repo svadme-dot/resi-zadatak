@@ -2526,41 +2526,45 @@ window.MathJax = {
       <button id="googleApiClose" class="googleApiNavBtn googleApiCloseBtn" type="button" title="Zatvori" aria-label="Zatvori">×</button>
     </div>
     <p>
-      Aplikacija pokušava redom <b>1 → 2 → 3 → 4</b>.
-      Na sledeći slot prelazi samo kada ključ, kvota ili Google servis zakažu
-      pre nego što se pojavi bilo koji deo odgovora.
+      Aplikacija prvo pokušava <b>Gemini 3.7 Flash: API 1 → 2 → 3 → 4</b>,
+      pa zatim <b>Gemini 3.6 Flash: API 1 → 2 → 3 → 4</b>.
+      Na sledeći pokušaj prelazi samo kada model nije dostupan ili ne podržava
+      zahtev, kada ključ, kvota ili Google servis zakažu, i to pre nego što se
+      pojavi bilo koji deo odgovora.
       Slot bez ključa se preskače.
     </p>
 
     <div class="apiSlots">
       <div class="apiSlot">
         <div class="apiSlotHead"><strong>API ključ 1</strong><span>primarni</span></div>
-        <input id="googleModel1" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
+        <input id="googleModel1" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.7-flash → gemini-3.6-flash" readonly aria-readonly="true">
         <input id="googleKey1" class="field" type="password" autocomplete="off" placeholder="API ključ 1">
       </div>
 
       <div class="apiSlot">
         <div class="apiSlotHead"><strong>API ključ 2</strong><span>rezerva</span></div>
-        <input id="googleModel2" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
+        <input id="googleModel2" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.7-flash → gemini-3.6-flash" readonly aria-readonly="true">
         <input id="googleKey2" class="field" type="password" autocomplete="off" placeholder="API ključ 2">
       </div>
 
       <div class="apiSlot">
         <div class="apiSlotHead"><strong>API ključ 3</strong><span>rezerva</span></div>
-        <input id="googleModel3" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
+        <input id="googleModel3" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.7-flash → gemini-3.6-flash" readonly aria-readonly="true">
         <input id="googleKey3" class="field" type="password" autocomplete="off" placeholder="API ključ 3">
       </div>
 
       <div class="apiSlot">
         <div class="apiSlotHead"><strong>API ključ 4</strong><span>poslednja rezerva</span></div>
-        <input id="googleModel4" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
+        <input id="googleModel4" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.7-flash → gemini-3.6-flash" readonly aria-readonly="true">
         <input id="googleKey4" class="field" type="password" autocomplete="off" placeholder="API ključ 4">
       </div>
     </div>
 
     <button id="saveKey" class="primary">Sačuvaj API ključeve</button>
     <p class="note">
-      Sva četiri slota koriste fiksno <b>Gemini 3.6 Flash</b>; razlikuju se samo API ključevi.
+      Sva četiri ključa prvo koriste <b>Gemini 3.7 Flash</b>, a ako nijedan
+      pokušaj ne uspe bez parcijalnog odgovora, isti ključevi se redom ponovo
+      pokušavaju sa <b>Gemini 3.6 Flash</b>.
       Ključevi se čuvaju samo lokalno u <b>localStorage</b>.
     </p>
   </div>
@@ -2570,7 +2574,15 @@ window.MathJax = {
 (() => {
   "use strict";
 
-  const DEFAULT_MODEL = "gemini-3.6-flash";
+  const PRIMARY_MODEL = "gemini-3.7-flash";
+  const FALLBACK_MODEL = "gemini-3.6-flash";
+  const MODEL_ATTEMPT_ORDER = Object.freeze([
+    PRIMARY_MODEL,
+    FALLBACK_MODEL
+  ]);
+  const MODEL_SEQUENCE_LABEL =
+    `${PRIMARY_MODEL} → ${FALLBACK_MODEL}`;
+  const IMAGE_MEDIA_RESOLUTION = "high";
   const API_STREAM_URL =
     "https://generativelanguage.googleapis.com/v1beta/interactions?alt=sse";
   const API_SYNC_URL =
@@ -3772,9 +3784,9 @@ window.MathJax = {
     return {
       slot,
       key: String(raw?.key || "").trim(),
-      // Model je namerno fiksiran za svaki slot. Ovo ujedno migrira stare
-      // localStorage profile koji su možda sadržali drugi naziv modela.
-      model: DEFAULT_MODEL
+      // U localStorage čuvamo samo primarni prikaz modela; stvarni niz
+      // pokušaja se uvek gradi iz MODEL_ATTEMPT_ORDER.
+      model: PRIMARY_MODEL
     };
   }
 
@@ -3804,7 +3816,7 @@ window.MathJax = {
 
       if (legacyKey) {
         profiles[0].key = legacyKey;
-        profiles[0].model = DEFAULT_MODEL;
+        profiles[0].model = PRIMARY_MODEL;
       }
     }
 
@@ -3814,7 +3826,7 @@ window.MathJax = {
         JSON.stringify(
           profiles.map(profile => ({
             key: profile.key,
-            model: DEFAULT_MODEL
+            model: PRIMARY_MODEL
           }))
         )
       );
@@ -3852,19 +3864,48 @@ window.MathJax = {
   }
 
   function getConfiguredGoogleProfiles() {
-    return loadGoogleProfiles()
-      .filter(p => p.key && p.model);
+    const configuredSlots = loadGoogleProfiles()
+      .filter(profile => profile.key);
+
+    // Tačan redosled: svi ključevi sa 3.7, pa isti ključevi sa 3.6.
+    return MODEL_ATTEMPT_ORDER.flatMap(model =>
+      configuredSlots.map(profile => ({
+        slot: profile.slot,
+        key: profile.key,
+        model
+      }))
+    );
   }
 
   function googleProfileId(profile) {
     return `${profile.slot}:${profile.model}`;
   }
 
+  function modelDisplayName(model) {
+    if (model === PRIMARY_MODEL) return "Gemini 3.7 Flash";
+    if (model === FALLBACK_MODEL) return "Gemini 3.6 Flash";
+    return String(model || "Gemini");
+  }
+
+  function requireAttemptModel(model) {
+    const value = String(model || "").trim();
+
+    if (!MODEL_ATTEMPT_ORDER.includes(value)) {
+      const err = new Error(
+        "Interna greška konfiguracije Gemini pokušaja."
+      );
+      err.code = "LOCAL_INVALID_MODEL";
+      throw err;
+    }
+
+    return value;
+  }
+
   function populateGoogleApiDialog() {
     const profiles = loadGoogleProfiles();
 
     for (let i = 0; i < 4; i++) {
-      googleModelInputs[i].value = DEFAULT_MODEL;
+      googleModelInputs[i].value = MODEL_SEQUENCE_LABEL;
       googleKeyInputs[i].value =
         profiles[i].key || "";
     }
@@ -3979,6 +4020,27 @@ window.MathJax = {
     activeSolveController.abort();
   }
 
+  function isModelCapabilityFallbackError(err) {
+    const status = Number(err?.status || 0);
+    const code = String(err?.code || "");
+    const message = String(err?.message || err || "");
+
+    const explicitCapabilityMessage =
+      /image input modality is not enabled|(?:model|models\/)[\s\S]{0,160}(?:not found|not available|unavailable|not enabled|not supported|unsupported)|(?:not supported|unsupported)[\s\S]{0,100}(?:by|for)\s+(?:the\s+)?(?:model|models\/)/i.test(
+        message
+      );
+
+    if (!explicitCapabilityMessage) return false;
+
+    return (
+      status === 0 ||
+      [400, 404, 422].includes(status) ||
+      /invalid.?argument|not.?found|failed.?precondition|unimplemented|unsupported/i.test(
+        code
+      )
+    );
+  }
+
   function isEligibleProfileFallbackError(err) {
     if (isUserStopError(err) || err?.name === "AbortError") {
       return false;
@@ -3988,6 +4050,10 @@ window.MathJax = {
     const message = String(err?.message || err || "");
 
     if (isRetriableDemandError(err)) {
+      return true;
+    }
+
+    if (isModelCapabilityFallbackError(err)) {
       return true;
     }
 
@@ -4011,6 +4077,13 @@ window.MathJax = {
   function profileFallbackReason(err) {
     const status = Number(err?.status || 0);
     const message = String(err?.message || err || "");
+
+    if (isModelCapabilityFallbackError(err)) {
+      if (/modality|image input|not enabled|not supported|unsupported/i.test(message)) {
+        return "model ne podržava ovaj tip zahteva";
+      }
+      return "model trenutno nije dostupan";
+    }
 
     if (status === 401 || status === 403 || /api.?key|key.?not.?valid/i.test(message)) {
       return "ključ nije prihvaćen";
@@ -5444,7 +5517,8 @@ window.MathJax = {
       parts.push({
         type: "image",
         data: img.data,
-        mime_type: img.mimeType
+        mime_type: img.mimeType,
+        resolution: IMAGE_MEDIA_RESOLUTION
       });
     }
 
@@ -5468,7 +5542,7 @@ window.MathJax = {
     excludeTrailingUser = false
   ) {
     const body = {
-      model: DEFAULT_MODEL,
+      model: requireAttemptModel(model),
       input: buildInteractionInput(
         text,
         img,
@@ -5560,9 +5634,70 @@ window.MathJax = {
     return out.trim();
   }
 
+  function terminalInteractionError(interaction, fallbackStatus = "") {
+    const status = String(
+      interaction?.status || fallbackStatus || "failed"
+    );
+    const entries = Array.isArray(interaction?.errors)
+      ? interaction.errors
+      : interaction?.error
+        ? [interaction.error]
+        : [];
+
+    const messages = entries
+      .map(item =>
+        String(
+          (typeof item === "string" ? item : "") ||
+          item?.message ||
+          item?.error?.message ||
+          ""
+        ).trim()
+      )
+      .filter(Boolean);
+
+    const firstCode =
+      entries[0]?.code ||
+      entries[0]?.error?.code ||
+      "";
+
+    const err = new Error(
+      messages.join("\n") ||
+      `Odgovor nije kompletan (${status}).`
+    );
+
+    err.code = firstCode;
+    err.interactionStatus = status;
+    err.isTerminalInteractionError = true;
+
+    const numericStatus = Number(firstCode);
+    if (Number.isFinite(numericStatus) && numericStatus > 0) {
+      err.status = numericStatus;
+    }
+
+    return err;
+  }
+
+  function throwIfTerminalInteractionFailed(result) {
+    if (!result?.terminalInteraction) return;
+
+    const status = String(
+      result.completedStatus ||
+      result.terminalInteraction.status ||
+      ""
+    );
+
+    if (status && status !== "completed") {
+      throw terminalInteractionError(
+        result.terminalInteraction,
+        status
+      );
+    }
+  }
+
   function isStalePreviousInteractionError(err) {
     const msg = String(err?.message || "");
-    return Boolean(previousInteractionId) && (
+    return Boolean(previousInteractionId) &&
+      !isModelCapabilityFallbackError(err) && (
       err?.status === 404 ||
       /previous.?interaction|requested entity was not found|result not found|not found|expired/i.test(msg)
     );
@@ -5685,6 +5820,7 @@ window.MathJax = {
     let answerText = "";
     let thoughtText = "";
     let eventCount = 0;
+    let terminalInteraction = null;
 
     const stepTypes = new Map();
 
@@ -5782,6 +5918,7 @@ window.MathJax = {
         const interaction = event.interaction || {};
         completed = true;
         completedStatus = interaction.status || "completed";
+        terminalInteraction = interaction;
 
         if (interaction.id) interactionId = interaction.id;
 
@@ -5848,11 +5985,15 @@ window.MathJax = {
         if (pendingDataLines.length === 1) {
           const raw = pendingDataLines[0].trim();
           if (raw && raw !== "[DONE]") {
+            let parsed;
             try {
-              const parsed = JSON.parse(raw);
-              pendingDataLines = [];
-              processEvent(parsed);
-            } catch {}
+              parsed = JSON.parse(raw);
+            } catch {
+              return;
+            }
+
+            pendingDataLines = [];
+            processEvent(parsed);
           }
         }
       }
@@ -5887,7 +6028,8 @@ window.MathJax = {
       completedStatus,
       answerText: answerText.trim(),
       thoughtText: thoughtText.trim(),
-      eventCount
+      eventCount,
+      terminalInteraction
     };
   }
 
@@ -5954,6 +6096,7 @@ window.MathJax = {
       completedStatus: data.status || "",
       answerText: extractInteractionOutputText(data),
       thoughtText: extractInteractionThoughtSummary(data),
+      terminalInteraction: data,
       raw: data
     };
   }
@@ -5989,7 +6132,10 @@ window.MathJax = {
 
         // Ako je samo stari previous_interaction_id istekao,
         // očisti ga i probaj ponovo kao novi turn.
-        if (isStalePreviousInteractionError(err)) {
+        if (
+          isStalePreviousInteractionError(err) &&
+          !hasVisibleLiveOutput()
+        ) {
           previousInteractionId = "";
           previousInteractionProfileId = "";
           continue;
@@ -5997,7 +6143,8 @@ window.MathJax = {
 
         if (
           attempt === 0 &&
-          isRetriableDemandError(err)
+          isRetriableDemandError(err) &&
+          !isModelCapabilityFallbackError(err)
         ) {
           await sleep(1200, signal);
           continue;
@@ -6044,7 +6191,8 @@ window.MathJax = {
         // Ako je stari server-side chat istekao, nastavi iz lokalne istorije.
         if (
           usePreviousId &&
-          isStalePreviousInteractionError(err)
+          isStalePreviousInteractionError(err) &&
+          !hasVisibleLiveOutput()
         ) {
           previousInteractionId = "";
           previousInteractionProfileId = "";
@@ -6062,6 +6210,7 @@ window.MathJax = {
         if (
           attempt < 2 &&
           isRetriableDemandError(err) &&
+          !isModelCapabilityFallbackError(err) &&
           !hasVisibleLiveOutput()
         ) {
           const wait = attempt === 0 ? 700 : 1400;
@@ -6401,7 +6550,7 @@ window.MathJax = {
 
         if (index > 0) {
           resetLiveModelForRetry(
-            `Prelazim na Google API ${profile.slot}…`
+            `Prelazim na Google API ${profile.slot} · ${modelDisplayName(profile.model)}…`
           );
         }
 
@@ -6426,6 +6575,11 @@ window.MathJax = {
             profile.model,
             result
           );
+
+          // Završni status failed/cancelled je autoritativan: ne šalji novi
+          // sync zahtev istom profilu, već klasifikuj razlog i eventualno
+          // pređi na sledeći pokušaj samo ako ništa nije prikazano.
+          throwIfTerminalInteractionFailed(result);
 
           // Ako browser proguta završni SSE event ili model_output,
           // pokušaj isti slot jednom i kao običan JSON odgovor.
@@ -6460,6 +6614,8 @@ window.MathJax = {
               profile.model,
               result
             );
+
+            throwIfTerminalInteractionFailed(result);
           }
 
           if (
@@ -6509,7 +6665,7 @@ window.MathJax = {
           // Naslov se izvodi lokalno, bez skrivenog dodatnog Gemini zahteva.
           maybeGenerateChatTitle(solvedChatId);
 
-          if (profile.slot === 1) {
+          if (index === 0) {
             setStatus("");
           } else {
             setStatus(
@@ -6552,7 +6708,7 @@ window.MathJax = {
             const next = profiles[index + 1];
             const reason = profileFallbackReason(err);
             setStatus(
-              `API ${profile.slot}: ${reason} — prelazim na API ${next.slot}…`
+              `API ${profile.slot} · ${modelDisplayName(profile.model)}: ${reason} — prelazim na API ${next.slot} · ${modelDisplayName(next.model)}…`
             );
             await sleep(650, solveSignal);
           }
@@ -6637,9 +6793,18 @@ window.MathJax = {
   }
 
   el("saveKey").addEventListener("click", () => {
+    if (busy || sendPreparing) {
+      setStatus(
+        "Sačekaj da se rešavanje završi ili ga zaustavi pre promene API ključeva.",
+        true
+      );
+      return;
+    }
+
+    const oldProfiles = loadGoogleProfiles();
     const profiles = [1,2,3,4].map((slot, i) => ({
       slot,
-      model: DEFAULT_MODEL,
+      model: PRIMARY_MODEL,
       key:
         googleKeyInputs[i].value.trim()
     }));
@@ -6656,6 +6821,11 @@ window.MathJax = {
       return;
     }
 
+    const keysChanged = profiles.some(
+      (profile, index) =>
+        profile.key !== String(oldProfiles[index]?.key || "")
+    );
+
     saveGoogleProfiles(profiles);
 
     // Ako je korisnik promenio ključeve/modele,
@@ -6663,6 +6833,14 @@ window.MathJax = {
     // Lokalna istorija ostaje, pa sledeći zahtev može bezbedno da je rekonstruiše.
     previousInteractionId = "";
     previousInteractionProfileId = "";
+
+    if (keysChanged) {
+      for (const chat of chats) {
+        chat.interactionId = "";
+        chat.interactionProfileId = "";
+      }
+      persistChats();
+    }
 
     closeKeyDialog();
     setStatus(
