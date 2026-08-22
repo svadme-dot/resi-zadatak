@@ -49,6 +49,24 @@ bootstrap supplies fake local API slots automatically. The PNG is reproducible:
    - Open Fallback assertions. The top-level ok value must be true, including
      api1Returned429, api2Completed, and api1WasBeforeApi2.
 
+4. Reload then retry an unanswered send
+   - Reset evidence and open Reload then empty-Send retry (automatic).
+   - The harness chooses the real PNG, enters its fixed test prompt, starts a
+     request, and reloads while that first SSE connection is still unanswered.
+   - After reload it opens the one saved chat and clicks Send with an empty
+     composer. Once the retry completes, it clicks empty Send once more.
+   - Open Reload/retry assertions for the run URL. The top-level ok value proves
+     the saved trailing user message and IndexedDB image survived, the retry used
+     the exact prompt and identical image bytes, only one user bubble exists,
+     only API 1 was used, and the completed answer did not create a third POST.
+
+The reload driver is harness-only. It uses the production UI selectors `#send`,
+`#prompt`, `#galleryInput`, `#historyBtn`, `#historyList .historyOpen`, and
+`#chat .msg.user/.model`. It reads the existing
+`gemini_mobile_chats_v1`/`matematika_chat_images_v1` persistence contract only
+to record assertions; it never changes production source or saved app state
+beyond the same clicks and upload a user performs.
+
 The Recorded request JSON view preserves each received body and response
 outcome. Solver assertions verify:
 

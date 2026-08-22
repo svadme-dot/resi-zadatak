@@ -2644,6 +2644,7 @@ window.MathJax = {
   const advancedSettingsOverlay = el("advancedSettingsOverlay");
 
   let busy = false;
+  let sendPreparing = false;
   let activeSolveController = null;
   let userStopRequested = false;
   let stopButtonHideTimer = null;
@@ -3291,7 +3292,7 @@ window.MathJax = {
   }
 
   function startNewChat() {
-    if (busy) return;
+    if (busy || sendPreparing) return;
 
     activeChatId = makeChatId();
     activeChatPersisted = false;
@@ -3308,7 +3309,7 @@ window.MathJax = {
   }
 
   function openSavedChat(id) {
-    if (busy) return;
+    if (busy || sendPreparing) return;
 
     const chat = chats.find(c => c.id === id);
     if (!chat) return;
@@ -3323,13 +3324,14 @@ window.MathJax = {
     clearSelectedImage();
     setStatus("");
     render();
+    showSavedTurnRetryHint();
     renderHistoryList();
     closeHistory();
     promptEl.focus();
   }
 
   function deleteSavedChat(id) {
-    if (busy) return;
+    if (busy || sendPreparing) return;
 
     const chat = chats.find(c => c.id === id);
     if (!chat) return;
@@ -5212,10 +5214,12 @@ window.MathJax = {
         `<div><strong>Matematika</strong>` +
         `Pošalji tekst ili dodaj sliku zadatka iz galerije / kamere.</div>`;
       chatEl.appendChild(empty);
+      syncSendButtonLabel();
       return;
     }
 
     for (const m of history) addStaticMessage(m);
+    syncSendButtonLabel();
     scrollBottom(false);
   }
 
@@ -5233,6 +5237,7 @@ window.MathJax = {
     galleryInput.value = "";
     preview.removeAttribute("src");
     previewWrap.classList.remove("show");
+    syncSendButtonLabel();
   }
 
   async function prepareImage(file) {
@@ -5283,8 +5288,111 @@ window.MathJax = {
     };
   }
 
-  function cleanHistoryForContext(messages) {
-    return (Array.isArray(messages) ? messages : [])
+  async function apiImageFromSavedMessage(message) {
+    const inMemoryImage = cloneApiImage(message?.apiImage);
+
+    if (inMemoryImage) {
+      return inMemoryImage;
+    }
+
+    if (!message?.imageId) {
+      return null;
+    }
+
+    const blob = await getChatImageBlob(message.imageId);
+
+    if (
+      !blob ||
+      !blob.size ||
+      !String(blob.type || "").startsWith("image/")
+    ) {
+      return null;
+    }
+
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(
+          reader.error || new Error("Ne mogu da pročitam sačuvanu sliku.")
+        );
+        reader.readAsDataURL(blob);
+      });
+
+      const encoded = String(dataUrl || "");
+      const comma = encoded.indexOf(",");
+      const data = comma >= 0 ? encoded.slice(comma + 1) : "";
+
+      if (!data) return null;
+
+      return {
+        data,
+        mimeType: blob.type
+      };
+    } catch (err) {
+      console.warn("[Ne mogu da pripremim sačuvanu sliku]", err);
+      return null;
+    }
+  }
+
+  function trailingUnansweredUserMessage() {
+    const last = history[history.length - 1];
+
+    if (
+      !last ||
+      last.role !== "user" ||
+      (!last.text && !last.hadImage)
+    ) {
+      return null;
+    }
+
+    return last;
+  }
+
+  function syncSendButtonLabel() {
+    const canResendSavedTurn = Boolean(
+      !busy &&
+      !sendPreparing &&
+      !promptEl.value.trim() &&
+      !selectedImage &&
+      trailingUnansweredUserMessage()
+    );
+
+    const label = canResendSavedTurn
+      ? "Pošalji ponovo sačuvani zadatak"
+      : "Pošalji";
+
+    sendBtn.title = label;
+    sendBtn.setAttribute("aria-label", label);
+  }
+
+  function showSavedTurnRetryHint() {
+    syncSendButtonLabel();
+
+    if (
+      !busy &&
+      !sendPreparing &&
+      !promptEl.value.trim() &&
+      !selectedImage &&
+      trailingUnansweredUserMessage()
+    ) {
+      setStatus(
+        "Zadatak je sačuvan. Pritisni ➤ za novi pokušaj slanja."
+      );
+    }
+  }
+
+  function cleanHistoryForContext(
+    messages,
+    excludeTrailingUser = false
+  ) {
+    const source = Array.isArray(messages) ? messages : [];
+    const scoped =
+      excludeTrailingUser && source[source.length - 1]?.role === "user"
+        ? source.slice(0, -1)
+        : source;
+
+    return scoped
       .slice(-MAX_STATELESS_HISTORY_MESSAGES)
       .filter(m => {
         if (!m?.text) return false;
@@ -5300,8 +5408,13 @@ window.MathJax = {
 
   // Ako je server-side previous_interaction_id istekao (free tier ga ne čuva
   // zauvek), napravi tekstualni kontekst iz naše lokalne istorije i nastavi chat.
-  function buildStatelessContextPrefix() {
-    const items = cleanHistoryForContext(history);
+  function buildStatelessContextPrefix(
+    excludeTrailingUser = false
+  ) {
+    const items = cleanHistoryForContext(
+      history,
+      excludeTrailingUser
+    );
     if (!items.length) return "";
 
     const lines = [
@@ -5318,7 +5431,12 @@ window.MathJax = {
     return lines.join("\n");
   }
 
-  function buildInteractionInput(text, img, includeLocalHistory = false) {
+  function buildInteractionInput(
+    text,
+    img,
+    includeLocalHistory = false,
+    excludeTrailingUser = false
+  ) {
     const finalText = text || DEFAULT_IMAGE_PROMPT;
     const parts = [];
 
@@ -5331,7 +5449,7 @@ window.MathJax = {
     }
 
     const prefix = includeLocalHistory
-      ? buildStatelessContextPrefix()
+      ? buildStatelessContextPrefix(excludeTrailingUser)
       : "";
 
     parts.push({
@@ -5342,13 +5460,20 @@ window.MathJax = {
     return parts;
   }
 
-  function buildInteractionRequest(text, img, model, usePreviousId = true) {
+  function buildInteractionRequest(
+    text,
+    img,
+    model,
+    usePreviousId = true,
+    excludeTrailingUser = false
+  ) {
     const body = {
       model: DEFAULT_MODEL,
       input: buildInteractionInput(
         text,
         img,
-        !usePreviousId && history.length > 0
+        !usePreviousId && history.length > 0,
+        excludeTrailingUser
       ),
       stream: true,
       store: true,
@@ -5766,7 +5891,15 @@ window.MathJax = {
     };
   }
 
-  async function requestInteractionOnce(text, img, key, model, profileId, signal) {
+  async function requestInteractionOnce(
+    text,
+    img,
+    key,
+    model,
+    profileId,
+    signal,
+    excludeTrailingUser = false
+  ) {
     // Koristi ISTI model/prompt/config, ali bez streaminga.
     // Ovo je rezervna mreža za browsere koji izgube SSE završni događaj.
     const usePreviousId = Boolean(
@@ -5774,7 +5907,13 @@ window.MathJax = {
       previousInteractionProfileId === profileId
     );
     const body =
-      buildInteractionRequest(text, img, model, usePreviousId);
+      buildInteractionRequest(
+        text,
+        img,
+        model,
+        usePreviousId,
+        excludeTrailingUser
+      );
 
     body.stream = false;
 
@@ -5819,14 +5958,28 @@ window.MathJax = {
     };
   }
 
-  async function requestInteractionOnceWithRetry(text, img, key, model, profileId, signal) {
+  async function requestInteractionOnceWithRetry(
+    text,
+    img,
+    key,
+    model,
+    profileId,
+    signal,
+    excludeTrailingUser = false
+  ) {
     let lastErr = null;
 
     for (let attempt = 0; attempt < 2; attempt++) {
       throwIfUserStopped(signal);
       try {
         return await requestInteractionOnce(
-          text, img, key, model, profileId, signal
+          text,
+          img,
+          key,
+          model,
+          profileId,
+          signal,
+          excludeTrailingUser
         );
       } catch (err) {
         if (isUserStopError(err, signal)) {
@@ -5863,7 +6016,8 @@ window.MathJax = {
     key,
     model,
     profileId,
-    signal
+    signal,
+    excludeTrailingUser = false
   ) {
     let usePreviousId = Boolean(
       previousInteractionId &&
@@ -5878,7 +6032,8 @@ window.MathJax = {
             text,
             img,
             model,
-            usePreviousId
+            usePreviousId,
+            excludeTrailingUser
           );
 
         return await streamInteraction(body, key, signal);
@@ -6081,85 +6236,155 @@ window.MathJax = {
   }
 
   async function send() {
-    if (busy) return;
+    if (busy || sendPreparing) return;
 
-    const profiles = getConfiguredGoogleProfiles();
-
-    if (!profiles.length) {
-      waitingForInitialApiKey = true;
-      openKeyDialog();
-      return;
-    }
-
-    const typedText = promptEl.value.trim();
-    const img = selectedImage;
-
-    if (!typedText && !img) return;
-
-    const finalText =
-      typedText || DEFAULT_IMAGE_PROMPT;
-
-    let imageId = "";
-
-    if (img) {
-      imageId = makeImageId();
-
-      let imageBlob = img.blob || null;
-
-      // Rezervna konverzija ako browser iz nekog razloga nije sačuvao blob.
-      if (!imageBlob && img.data && img.mimeType) {
-        try {
-          const binary = atob(img.data);
-          const bytes = new Uint8Array(binary.length);
-
-          for (let i = 0; i < binary.length; i++) {
-            bytes[i] = binary.charCodeAt(i);
-          }
-
-          imageBlob = new Blob(
-            [bytes],
-            { type: img.mimeType }
-          );
-        } catch {}
-      }
-
-      const saved =
-        await saveChatImage(
-          imageId,
-          imageBlob
-        );
-
-      if (!saved) {
-        // Thumbnail će i dalje raditi u trenutnoj sesiji preko previewUrl-a.
-        // Ne upisujemo lažni imageId ako trajno čuvanje nije uspelo.
-        imageId = "";
-      }
-    }
-
-    // User poruka u UI + lokalnoj istoriji.
-    history.push({
-      role: "user",
-      text: finalText,
-      hadImage: !!img,
-      imageId,
-      previewUrl: img?.previewUrl || null,
-      apiImage: cloneApiImage(img),
-      timestamp: Date.now()
-    });
-    saveHistory();
-
-    promptEl.value = "";
-    autoGrow();
-
-    selectedImage = null;
-    cameraInput.value = "";
-    galleryInput.value = "";
-    previewWrap.classList.remove("show");
-
-    busy = true;
+    sendPreparing = true;
     sendBtn.disabled = true;
     el("pickImage").disabled = true;
     el("newChat").disabled = true;
+
+    let profiles = [];
+    let requestText = "";
+    let requestImage = null;
+
+    try {
+      profiles = getConfiguredGoogleProfiles();
+
+      if (!profiles.length) {
+        waitingForInitialApiKey = true;
+        openKeyDialog();
+        return;
+      }
+
+      requestText = promptEl.value.trim();
+      requestImage = selectedImage;
+
+      const savedUserMessage =
+        !requestText && !requestImage
+          ? trailingUnansweredUserMessage()
+          : null;
+
+      if (!requestText && !requestImage && !savedUserMessage) {
+        return;
+      }
+
+      if (savedUserMessage) {
+        const retryChatId = activeChatId;
+        requestText = String(
+          savedUserMessage.text || ""
+        );
+
+        if (savedUserMessage.hadImage) {
+          requestImage = await apiImageFromSavedMessage(
+            savedUserMessage
+          );
+
+          if (!requestImage) {
+            setStatus(
+              "Sačuvana slika više nije dostupna. Dodaj je ponovo pa pošalji zadatak.",
+              true
+            );
+            return;
+          }
+        }
+
+        // Učitavanje slike je asinhrono. Ako se chat u međuvremenu promenio,
+        // stari turn ne sme da bude poslat u novi chat.
+        if (
+          activeChatId !== retryChatId ||
+          history[history.length - 1] !== savedUserMessage
+        ) {
+          setStatus(
+            "Chat se promenio; sačuvani zadatak nije ponovo poslat.",
+            true
+          );
+          return;
+        }
+      } else {
+        const finalText =
+          requestText || DEFAULT_IMAGE_PROMPT;
+
+        let imageId = "";
+
+        if (requestImage) {
+          imageId = makeImageId();
+
+          let imageBlob = requestImage.blob || null;
+
+          // Rezervna konverzija ako browser iz nekog razloga nije sačuvao blob.
+          if (
+            !imageBlob &&
+            requestImage.data &&
+            requestImage.mimeType
+          ) {
+            try {
+              const binary = atob(requestImage.data);
+              const bytes = new Uint8Array(binary.length);
+
+              for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+              }
+
+              imageBlob = new Blob(
+                [bytes],
+                { type: requestImage.mimeType }
+              );
+            } catch {}
+          }
+
+          const saved =
+            await saveChatImage(
+              imageId,
+              imageBlob
+            );
+
+          if (!saved) {
+            // Thumbnail će i dalje raditi u trenutnoj sesiji preko previewUrl-a.
+            // Ne upisujemo lažni imageId ako trajno čuvanje nije uspelo.
+            imageId = "";
+          }
+        }
+
+        // Samo potpuno nov zahtev dobija novi korisnički oblačić.
+        // Ponovno slanje koristi već sačuvani turn bez dupliranja.
+        history.push({
+          role: "user",
+          text: finalText,
+          hadImage: !!requestImage,
+          imageId,
+          previewUrl: requestImage?.previewUrl || null,
+          apiImage: cloneApiImage(requestImage),
+          timestamp: Date.now()
+        });
+        saveHistory();
+      }
+
+      promptEl.value = "";
+      autoGrow();
+
+      selectedImage = null;
+      cameraInput.value = "";
+      galleryInput.value = "";
+      previewWrap.classList.remove("show");
+
+      busy = true;
+    } catch (err) {
+      setStatus(
+        err?.message || "Sačuvani zadatak nije mogao da se pripremi.",
+        true
+      );
+      return;
+    } finally {
+      sendPreparing = false;
+
+      if (!busy) {
+        sendBtn.disabled = false;
+        el("pickImage").disabled = false;
+        el("newChat").disabled = false;
+        syncSendButtonLabel();
+      }
+    }
+
     const solveSignal = beginSolveControl();
     let solveOutcome = "interrupted";
 
@@ -6187,12 +6412,13 @@ window.MathJax = {
         try {
           let result =
             await runInteractionWithRecovery(
-              typedText,
-              img,
+              requestText,
+              requestImage,
               profile.key,
               profile.model,
               profileId,
-              solveSignal
+              solveSignal,
+              true
             );
 
           console.debug(
@@ -6220,12 +6446,13 @@ window.MathJax = {
 
             result =
               await requestInteractionOnceWithRetry(
-                typedText,
-                img,
+                requestText,
+                requestImage,
                 profile.key,
                 profile.model,
                 profileId,
-                solveSignal
+                solveSignal,
+                true
               );
 
             console.debug(
@@ -6397,6 +6624,7 @@ window.MathJax = {
       sendBtn.disabled = false;
       el("pickImage").disabled = false;
       el("newChat").disabled = false;
+      syncSendButtonLabel();
       finishSolveControl(
         solveOutcome === "completed"
           ? "✓ Gotovo"
@@ -6615,6 +6843,7 @@ window.MathJax = {
       selectedImage = await prepareImage(file);
       preview.src = selectedImage.previewUrl;
       previewWrap.classList.add("show");
+      syncSendButtonLabel();
 
       setStatus("");
     } catch (e) {
@@ -6895,7 +7124,10 @@ window.MathJax = {
     }
   });
 
-  promptEl.addEventListener("input", autoGrow);
+  promptEl.addEventListener("input", () => {
+    autoGrow();
+    syncSendButtonLabel();
+  });
 
   promptEl.addEventListener("keydown", e => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -6912,6 +7144,16 @@ window.MathJax = {
       try { URL.revokeObjectURL(url); } catch {}
     }
     chatImageUrlCache.clear();
+  });
+
+  window.addEventListener("pageshow", () => {
+    showSavedTurnRetryHint();
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      showSavedTurnRetryHint();
+    }
   });
 
   applyTheme(getSavedTheme(), false);

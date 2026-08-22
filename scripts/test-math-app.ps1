@@ -57,6 +57,18 @@ Assert-True ($source -match 'completionState:\s*"stopped"') `
   "zaustavljeni parcijalni odgovor mora biti sačuvan"
 Assert-True ($source -match 'saveCurrentInteractionId\("",\s*""\)') `
   "prekinuti turn mora očistiti stari server-side interaction ID"
+Assert-True ($source -match 'function\s+trailingUnansweredUserMessage\s*\(') `
+  "mora postojati prepoznavanje poslednjeg korisnickog turna bez odgovora"
+Assert-True ($source -match 'async\s+function\s+apiImageFromSavedMessage\s*\(') `
+  "ponovno slanje slike mora ucitati original iz lokalne baze"
+Assert-True ($source -match 'if\s*\(busy\s*\|\|\s*sendPreparing\)\s*return') `
+  "priprema slanja mora blokirati dupli klik"
+Assert-True ($source -match 'history\[history\.length\s*-\s*1\]\s*!==\s*savedUserMessage') `
+  "asinhrono ucitavanje mora ponovo proveriti isti sacuvani turn"
+Assert-True ($source -match 'source\.slice\(0,\s*-1\)') `
+  "tekuci korisnicki turn mora biti izuzet iz lokalnog konteksta"
+Assert-True ($source -match 'Sa.uvana slika vi.e nije dostupna') `
+  "nedostupna sacuvana slika mora zaustaviti zahtev i traziti novo prilaganje"
 Assert-True ($source -notmatch 'window\.fetch\s*=|AbortSignal\.timeout') `
   "globalni fetch/timer monkeypatch ne sme postojati u aplikaciji"
 Assert-True ($source -notmatch 'google_search|googleSearch|google_search_retrieval') `
@@ -64,12 +76,12 @@ Assert-True ($source -notmatch 'google_search|googleSearch|google_search_retriev
 
 Assert-True ($loader -notmatch 'window\.fetch\s*=|AbortSignal\.timeout|realSetTimeout') `
   "loader više ne sme sadržati Stop monkeypatch"
-Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=11') -eq 9) `
-  "loader mora koristiti svih 9 chunk URL-ova sa v=11"
-Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v17"') `
-  "service worker cache mora biti v17"
-Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=11') -eq 9) `
-  "service worker mora keširati svih 9 chunk URL-ova sa v=11"
+Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=12') -eq 9) `
+  "loader mora koristiti svih 9 chunk URL-ova sa v=12"
+Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v18"') `
+  "service worker cache mora biti v18"
+Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=12') -eq 9) `
+  "service worker mora keširati svih 9 chunk URL-ova sa v=12"
 
 & (Join-Path $PSScriptRoot "build-math-app.ps1") -CheckOnly | Out-Null
 Write-Output "Sve statičke provere matematičke aplikacije su prošle."

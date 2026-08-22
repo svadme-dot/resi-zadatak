@@ -11,7 +11,14 @@ const GEMINI_ORIGIN =
   'https://generativelanguage.googleapis.com/v1beta/interactions';
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 4173;
-const VALID_SCENARIOS = new Set(['success', 'slow', 'fallback-429']);
+const VALID_SCENARIOS = new Set([
+  'success',
+  'slow',
+  'fallback-429',
+  'retry-after-reload'
+]);
+const RETRY_PROMPT =
+  'E2E ponovni pokušaj: reši jednačinu 2x + 3 = 11.';
 
 const MIME_TYPES = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -78,6 +85,12 @@ function scenarioFrom(url) {
 function findImagePart(body) {
   const input = Array.isArray(body?.input) ? body.input : [];
   return input.find(part => part?.type === 'image') || null;
+}
+
+function findTextPart(body) {
+  const input = Array.isArray(body?.input) ? body.input : [];
+  const textParts = input.filter(part => part?.type === 'text');
+  return textParts.length ? String(textParts[textParts.length - 1]?.text || '') : '';
 }
 
 function isBase64(value) {
@@ -170,10 +183,16 @@ function evaluateSolverRequest(record) {
 
 function evaluateRequests(requestLog, options = {}) {
   const scenario = options.scenario || '';
+  const run = options.run || '';
   const relevant = requestLog.filter(record =>
-    !scenario || record.scenario === scenario
+    (!scenario || record.scenario === scenario) &&
+    (!run || record.run === run)
   );
   const solverRecords = relevant;
+  const clientEvidence = (options.clientEvidenceLog || []).filter(record =>
+    (!scenario || record.scenario === scenario) &&
+    (!run || record.run === run)
+  );
   const requestAssertions = solverRecords.map(evaluateSolverRequest);
   const scenarioChecks = {};
 
@@ -206,6 +225,60 @@ function evaluateRequests(requestLog, options = {}) {
     );
   }
 
+  if (scenario === 'retry-after-reload') {
+    const api1 = solverRecords.filter(record => record.apiKey === 'e2e-api-1');
+    const api2 = solverRecords.filter(record => record.apiKey === 'e2e-api-2');
+    const first = api1[0] || null;
+    const retry = api1[1] || null;
+    const firstImage = findImagePart(first?.body);
+    const retryImage = findImagePart(retry?.body);
+    const evidenceByLabel = label =>
+      clientEvidence.find(record => record.body?.label === label)?.body || null;
+    const reloaded = evidenceByLabel('after-reload-pending-open');
+    const retryStarted = evidenceByLabel('retry-request-started');
+    const completed = evidenceByLabel('after-retry-completed');
+    const afterCompletedSend = evidenceByLabel('after-completed-empty-send');
+
+    scenarioChecks.firstRequestAbortedForReload =
+      first?.response?.outcome === 'client-aborted' &&
+      first?.response?.closedEarly === true;
+    scenarioChecks.savedUnansweredPromptSurvivedReload =
+      reloaded?.storage?.chatFound === true &&
+      reloaded?.storage?.matchingUserMessages === 1 &&
+      reloaded?.storage?.modelMessages === 0 &&
+      reloaded?.storage?.lastRole === 'user' &&
+      reloaded?.storage?.savedPrompt === RETRY_PROMPT;
+    scenarioChecks.savedRealImageSurvivedReload =
+      reloaded?.storage?.hadImage === true &&
+      reloaded?.storage?.imageIdPresent === true &&
+      reloaded?.indexedImage?.found === true &&
+      String(reloaded?.indexedImage?.mimeType || '').startsWith('image/') &&
+      Number(reloaded?.indexedImage?.bytes || 0) > 100;
+    scenarioChecks.retryPromptIsExact =
+      findTextPart(retry?.body) === RETRY_PROMPT;
+    scenarioChecks.retryImageIsByteExact = Boolean(
+      firstImage &&
+      retryImage &&
+      firstImage.mime_type === retryImage.mime_type &&
+      firstImage.data === retryImage.data
+    );
+    scenarioChecks.noDuplicateUserOnRetry =
+      retryStarted?.storage?.matchingUserMessages === 1 &&
+      retryStarted?.dom?.matchingUserBubbles === 1 &&
+      completed?.storage?.matchingUserMessages === 1 &&
+      completed?.dom?.matchingUserBubbles === 1;
+    scenarioChecks.retryCompleted =
+      retry?.response?.outcome === 'completed' &&
+      completed?.storage?.completedModels >= 1 &&
+      completed?.storage?.lastRole === 'model';
+    scenarioChecks.completedAnswerIsNotResendable =
+      api1.length === 2 &&
+      afterCompletedSend?.storage?.matchingUserMessages === 1 &&
+      afterCompletedSend?.storage?.completedModels >= 1 &&
+      afterCompletedSend?.storage?.lastRole === 'model';
+    scenarioChecks.noUnexpectedApi2 = api2.length === 0;
+  }
+
   const hasSolverRequest = solverRecords.length > 0;
   const requestsOk =
     hasSolverRequest &&
@@ -217,17 +290,20 @@ function evaluateRequests(requestLog, options = {}) {
     ok: requestsOk && scenarioOk,
     filters: {
       scenario: scenario || null,
+      run: run || null,
       expectStop: Boolean(options.expectStop)
     },
     counts: {
       allMatchingRequests: relevant.length,
       solverRequests: solverRecords.length,
+      clientEvidence: clientEvidence.length,
       solverRequestsWithImage: solverRecords.filter(record =>
         Boolean(findImagePart(record.body))
       ).length
     },
     scenarioChecks,
-    requests: requestAssertions
+    requests: requestAssertions,
+    clientEvidence
   };
 }
 
@@ -441,16 +517,53 @@ function streamInteraction(res, record) {
   }
 }
 
+function holdInteractionUntilReload(res, record) {
+  record.response = {
+    status: 200,
+    outcome: 'streaming-unanswered',
+    eventsSent: 0,
+    closedEarly: false
+  };
+
+  res.writeHead(200, {
+    'Cache-Control': 'no-cache, no-store',
+    'Connection': 'keep-alive',
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'X-Accel-Buffering': 'no'
+  });
+  res.flushHeaders();
+  res.write(': waiting for deterministic reload\n\n');
+
+  const safetyTimer = setTimeout(() => {
+    if (res.destroyed || res.writableEnded) return;
+    record.response.outcome = 'reload-not-observed';
+    res.end();
+  }, 30000);
+  safetyTimer.unref?.();
+
+  res.once('close', () => {
+    clearTimeout(safetyTimer);
+    if (!res.writableEnded) {
+      record.response.closedEarly = true;
+      record.response.outcome = 'client-aborted';
+    }
+  });
+}
+
 function harnessBootstrap() {
   const lines = [
     '<script id="math-e2e-bootstrap">',
     '(function () {',
     '  var params = new URLSearchParams(location.search);',
-    '  var allowed = ["success", "slow", "fallback-429"];',
+    '  var allowed = ["success", "slow", "fallback-429", "retry-after-reload"];',
     '  var scenario = params.get("scenario") || "success";',
     '  if (allowed.indexOf(scenario) === -1) scenario = "success";',
     '  var runId = params.get("run") || scenario;',
-    '  if (params.get("fresh") !== "0") localStorage.clear();',
+    '  var freshKey = "math-e2e-fresh:" + scenario + ":" + runId;',
+    '  if (params.get("fresh") !== "0" && sessionStorage.getItem(freshKey) !== "1") {',
+    '    localStorage.clear();',
+    '    sessionStorage.setItem(freshKey, "1");',
+    '  }',
     '  var profiles = [',
     '    { key: "e2e-api-1", model: "gemini-3.6-flash" },',
     '    scenario === "fallback-429"',
@@ -482,15 +595,34 @@ function harnessBootstrap() {
     '      } else {',
     '        input = mock.href;',
     '      }',
+    '      if (scenario === "retry-after-reload" && window.__MATH_E2E_RETRY__?.onGeminiRequest) {',
+    '        try { window.__MATH_E2E_RETRY__.onGeminiRequest(); } catch (error) {',
+    '          console.error("[Math E2E retry request hook]", error);',
+    '        }',
+    '      }',
     '    }',
     '    return realFetch(input, init);',
     '  };',
     '  window.__MATH_E2E__ = {',
     '    scenario: scenario,',
     '    runId: runId,',
-    '    requests: "/__harness__/requests?scenario=" + encodeURIComponent(scenario),',
-    '    assertions: "/__harness__/assertions?scenario=" + encodeURIComponent(scenario)',
+    '    requests: "/__harness__/requests?scenario=" + encodeURIComponent(scenario) + "&run=" + encodeURIComponent(runId),',
+    '    assertions: "/__harness__/assertions?scenario=" + encodeURIComponent(scenario) + "&run=" + encodeURIComponent(runId)',
     '  };',
+    '  if (scenario === "retry-after-reload") {',
+    '    var originalDocumentWrite = Document.prototype.write;',
+    '    Document.prototype.write = function () {',
+    '      var args = Array.prototype.slice.call(arguments);',
+    '      Document.prototype.write = originalDocumentWrite;',
+    '      var tag = "<scr" + "ipt src=\"/__harness__/retry-after-reload-driver.js\"></scr" + "ipt>";',
+    '      args = args.map(function (value) {',
+    '        return typeof value === "string"',
+    '          ? value.replace(/<\\/body>/i, tag + "</body>")',
+    '          : value;',
+    '      });',
+    '      return originalDocumentWrite.apply(this, args);',
+    '    };',
+    '  }',
     '  if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {',
     '    navigator.serviceWorker.getRegistrations().then(function (items) {',
     '      items.forEach(function (registration) { registration.unregister(); });',
@@ -520,6 +652,7 @@ function injectHarness(indexHtml) {
 
 function dashboardHtml(host, port) {
   const base = 'http://' + host + ':' + port;
+  const retryRun = 'retry-' + Date.now();
   return [
     '<!doctype html>',
     '<html lang="en"><head><meta charset="utf-8">',
@@ -535,6 +668,7 @@ function dashboardHtml(host, port) {
     '<li><a href="' + base + '/docs/?scenario=success&fresh=1">Success stream</a></li>',
     '<li><a href="' + base + '/docs/?scenario=slow&fresh=1">Slow stream for Stop</a></li>',
     '<li><a href="' + base + '/docs/?scenario=fallback-429&fresh=1">API 1 returns 429, API 2 succeeds</a></li>',
+    '<li><a href="' + base + '/docs/?scenario=retry-after-reload&fresh=1&run=' + retryRun + '">Reload then empty-Send retry (automatic)</a></li>',
     '</ul></div>',
     '<div class="card"><h2>Evidence</h2><ul>',
     '<li><a href="/__harness__/requests">Recorded request JSON</a></li>',
@@ -542,6 +676,7 @@ function dashboardHtml(host, port) {
     '<li><a href="/__harness__/assertions?scenario=success">Success assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=fallback-429">Fallback assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=slow&expectStop=1">Stop/abort assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=retry-after-reload&run=' + retryRun + '">Reload/retry assertions</a></li>',
     '<li><a href="/__harness__/reset">Reset recorded evidence</a></li>',
     '<li><a href="/tests/e2e/fixtures/linear-equation.png">Synthetic math image (PNG)</a></li>',
     '</ul></div>',
@@ -591,7 +726,9 @@ function safeFile(baseDir, relativePath) {
 
 export function createHarnessServer() {
   const requestLog = [];
+  const clientEvidenceLog = [];
   let nextRequestId = 1;
+  let nextClientEvidenceId = 1;
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -619,7 +756,9 @@ export function createHarnessServer() {
 
       if (url.pathname === '/__harness__/reset') {
         requestLog.length = 0;
+        clientEvidenceLog.length = 0;
         nextRequestId = 1;
+        nextClientEvidenceId = 1;
         if (req.method === 'GET') {
           sendText(
             res,
@@ -635,10 +774,43 @@ export function createHarnessServer() {
 
       if (url.pathname === '/__harness__/requests') {
         const requestedScenario = url.searchParams.get('scenario') || '';
+        const requestedRun = url.searchParams.get('run') || '';
         const records = requestLog.filter(record =>
-          !requestedScenario || record.scenario === requestedScenario
+          (!requestedScenario || record.scenario === requestedScenario) &&
+          (!requestedRun || record.run === requestedRun)
         );
         sendJson(res, 200, { count: records.length, requests: records });
+        return;
+      }
+
+      if (url.pathname === '/__harness__/client-evidence') {
+        const requestedScenario = url.searchParams.get('scenario') || '';
+        const requestedRun = url.searchParams.get('run') || '';
+
+        if (req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const record = {
+            id: nextClientEvidenceId++,
+            receivedAt: new Date().toISOString(),
+            scenario: requestedScenario,
+            run: requestedRun,
+            body
+          };
+          clientEvidenceLog.push(record);
+          sendJson(res, 200, { ok: true, id: record.id });
+          return;
+        }
+
+        if (req.method !== 'GET') {
+          sendJson(res, 405, { error: { message: 'GET or POST required.' } });
+          return;
+        }
+
+        const records = clientEvidenceLog.filter(record =>
+          (!requestedScenario || record.scenario === requestedScenario) &&
+          (!requestedRun || record.run === requestedRun)
+        );
+        sendJson(res, 200, { count: records.length, evidence: records });
         return;
       }
 
@@ -648,7 +820,9 @@ export function createHarnessServer() {
           200,
           evaluateRequests(requestLog, {
             scenario: url.searchParams.get('scenario') || '',
-            expectStop: url.searchParams.get('expectStop') === '1'
+            run: url.searchParams.get('run') || '',
+            expectStop: url.searchParams.get('expectStop') === '1',
+            clientEvidenceLog
           })
         );
         return;
@@ -663,11 +837,17 @@ export function createHarnessServer() {
         const body = await readJsonBody(req);
         const scenario = scenarioFrom(url);
         const apiKey = String(req.headers['x-goog-api-key'] || '');
+        const run = url.searchParams.get('run') || '';
+        const scenarioRequestIndex = requestLog.filter(record =>
+          record.scenario === scenario &&
+          record.run === run
+        ).length + 1;
         const record = {
           id: nextRequestId++,
           receivedAt: new Date().toISOString(),
-          run: url.searchParams.get('run') || '',
+          run,
           scenario,
+          scenarioRequestIndex,
           kind: 'solve',
           apiKey,
           request: {
@@ -681,6 +861,35 @@ export function createHarnessServer() {
           response: null
         };
         requestLog.push(record);
+
+        if (
+          scenario === 'retry-after-reload' &&
+          apiKey === 'e2e-api-2'
+        ) {
+          record.response = {
+            status: 409,
+            outcome: 'unexpected-api2',
+            eventsSent: 0,
+            closedEarly: false
+          };
+          sendJson(res, 409, {
+            error: {
+              code: 409,
+              status: 'FAILED_PRECONDITION',
+              message: 'Deterministic mock: API 2 must not be used for reload retry.'
+            }
+          });
+          return;
+        }
+
+        if (
+          scenario === 'retry-after-reload' &&
+          apiKey === 'e2e-api-1' &&
+          scenarioRequestIndex === 1
+        ) {
+          holdInteractionUntilReload(res, record);
+          return;
+        }
 
         if (
           scenario === 'fallback-429' &&
@@ -726,6 +935,14 @@ export function createHarnessServer() {
           transform: buffer =>
             Buffer.from(injectHarness(buffer.toString('utf8')), 'utf8')
         });
+        return;
+      }
+
+      if (url.pathname === '/__harness__/retry-after-reload-driver.js') {
+        await serveFile(
+          res,
+          path.join(HERE, 'retry-after-reload-driver.js')
+        );
         return;
       }
 
@@ -786,7 +1003,11 @@ export function createHarnessServer() {
   return {
     server,
     requestLog,
-    evaluate: options => evaluateRequests(requestLog, options)
+    clientEvidenceLog,
+    evaluate: options => evaluateRequests(requestLog, {
+      ...options,
+      clientEvidenceLog
+    })
   };
 }
 
@@ -817,6 +1038,7 @@ if (isMain) {
         'Success:   http://' + host + ':' + actualPort + '/docs/?scenario=success&fresh=1',
         'Slow/Stop: http://' + host + ':' + actualPort + '/docs/?scenario=slow&fresh=1',
         'Fallback:  http://' + host + ':' + actualPort + '/docs/?scenario=fallback-429&fresh=1',
+        'Retry:     http://' + host + ':' + actualPort + '/docs/?scenario=retry-after-reload&fresh=1&run=retry-' + Date.now(),
         'Fixture:   ' + path.join(FIXTURES_DIR, 'linear-equation.png'),
         ''
       ].join('\n')
