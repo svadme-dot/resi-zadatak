@@ -104,11 +104,44 @@ $localLimiter = $source.Substring(
   $localLimiterEnd - $localLimiterStart
 )
 
-$phaseStart = $source.IndexOf('      let phase = "gateway";')
-$phaseEnd = $source.IndexOf("      if (!solved) {", $phaseStart)
-Assert-True ($phaseStart -ge 0 -and $phaseEnd -gt $phaseStart) `
-  "odvojene gateway/local faze nisu pronađene"
-$phaseFlow = $source.Substring($phaseStart, $phaseEnd - $phaseStart)
+$profileSelectionStart = $source.IndexOf("  function getApiProfiles()")
+$profileSelectionEnd = $source.IndexOf("  function apiProfileId", $profileSelectionStart)
+Assert-True ($profileSelectionStart -ge 0 -and $profileSelectionEnd -gt $profileSelectionStart) `
+  "local-first izbor API profila nije pronađen"
+$profileSelection = $source.Substring(
+  $profileSelectionStart,
+  $profileSelectionEnd - $profileSelectionStart
+)
+
+$solveProfilesStart = $source.IndexOf("      const phaseProfiles = profiles;")
+$solveProfilesEnd = $source.IndexOf("      if (!solved) {", $solveProfilesStart)
+Assert-True ($solveProfilesStart -ge 0 -and $solveProfilesEnd -gt $solveProfilesStart) `
+  "jednofazni local/gateway solve tok nije pronađen"
+$solveProfiles = $source.Substring(
+  $solveProfilesStart,
+  $solveProfilesEnd - $solveProfilesStart
+)
+
+$parserStart = $source.IndexOf("  function parseLocalApiKeyText")
+$parserEnd = $source.IndexOf("  function normalizeLocalApiProfile", $parserStart)
+Assert-True ($parserStart -ge 0 -and $parserEnd -gt $parserStart) `
+  "parser lokalnog API key fajla nije pronađen"
+$localFileParser = $source.Substring($parserStart, $parserEnd - $parserStart)
+
+$importStart = $source.IndexOf("  async function importLocalApiKeyFile")
+$importEnd = $source.IndexOf("  function populateLocalApiDialog", $importStart)
+Assert-True ($importStart -ge 0 -and $importEnd -gt $importStart) `
+  "lokalni file importer nije pronađen"
+$localFileImporter = $source.Substring($importStart, $importEnd - $importStart)
+
+$importHandlerStart = $source.IndexOf('  el("importLocalKeys").addEventListener')
+$importHandlerEnd = $source.IndexOf('  el("saveLocalKeys").addEventListener', $importHandlerStart)
+Assert-True ($importHandlerStart -ge 0 -and $importHandlerEnd -gt $importHandlerStart) `
+  "UI handler za lokalni file import nije pronađen"
+$localFileImportHandler = $source.Substring(
+  $importHandlerStart,
+  $importHandlerEnd - $importHandlerStart
+)
 
 Assert-True ($source -match '<div class="mobileNavModel">Re.avanje zadataka</div>') `
   "bocni meni mora prikazivati trazeni podnaslov"
@@ -129,8 +162,10 @@ Assert-True ($source -match 'const\s+API_GATEWAY_URL\s*=') `
   "frontend mora koristiti server-side API gateway"
 Assert-True ($source -match 'const\s+API_SLOT_ORDER\s*=\s*Object\.freeze\(\[1,\s*2,\s*3,\s*4\]\)') `
   "redosled API slotova mora ostati 1, 2, 3, 4"
-Assert-True ($source -match 'function\s+getApiProfiles\s*\(\)[\s\S]{0,220}transport:\s*"gateway"[\s\S]{0,100}\bslot\b') `
-  "primarni profil mora ostati neutralni gateway slot 1-4"
+Assert-True ($profileSelection -match 'const\s+localProfiles\s*=\s*getConfiguredLocalApiProfiles\(\)[\s\S]{0,100}if\s*\(localProfiles\.length\)\s*return\s+localProfiles') `
+  "bar jedan lokalni ključ mora izabrati samo lokalne profile"
+Assert-True ($profileSelection -match 'return\s+API_SLOT_ORDER\.map\(slot\s*=>\s*\(\{[\s\S]{0,100}transport:\s*"gateway"[\s\S]{0,80}\bslot\b') `
+  "tek nula lokalnih ključeva mora izabrati neutralne gateway slotove 1-4"
 Assert-True ($source -match '"X-Math-Api-Slot":\s*String\(profile\.slot\)') `
   "gateway zahtev mora slati samo neutralni broj API slota"
 Assert-True ($gatewayFetch -notmatch 'x-goog-api-key|profile\.key|LOCAL_UPSTREAM') `
@@ -170,14 +205,32 @@ Assert-True ($source -match 'const\s+LOCAL_FALLBACK_STORAGE\s*=\s*\r?\n\s*"matem
   "opciona lokalna rezerva mora imati sopstveni neutralni storage"
 Assert-True ($source -match 'function\s+getConfiguredLocalApiProfiles\s*\(\)[\s\S]{0,160}filter\(profile\s*=>\s*profile\.key\)') `
   "prazni lokalni slotovi moraju biti opcioni i preskočeni"
-Assert-True ($source -match '"Lokalna API rezerva je isklju.ena\."') `
-  "čuvanje sva četiri prazna polja mora dozvoljeno isključiti lokalnu rezervu"
+Assert-True ($source -match '"Lokalni klju.evi su uklonjeni; koristi se Cloudflare\."') `
+  "čuvanje sva četiri prazna polja mora vratiti Cloudflare režim"
 Assert-True ($source -notmatch 'Unesi bar jedan[^\r\n]*API ključ') `
-  "lokalna rezerva mora ostati potpuno opciona"
+  "lokalni ključevi moraju ostati potpuno opcioni"
+Assert-True ($keyOverlay -match '<input\s+id="localKeysFile"\s+type="file"\s+accept="\.txt,text/plain"\s+hidden>') `
+  "keyOverlay mora imati skriveni lokalni .txt file picker"
+Assert-True ($keyOverlay -match 'id="importLocalKeys"[\s\S]{0,100}Uvezi i sa.uvaj api_keys\.txt') `
+  "keyOverlay mora nuditi eksplicitan lokalni api_keys.txt import"
+Assert-True ($source -match 'const\s+MAX_LOCAL_API_FILE_BYTES\s*=\s*16\s*\*\s*1024') `
+  "lokalni API fajl mora imati mali fiksni size limit"
+Assert-True ($localFileParser -match 'replace\(/\^\\uFEFF/' -and $localFileParser -match 'split\(/\\r\\n\|\\n\|\\r/' -and $localFileParser -match 'keys\.length\s*>\s*API_SLOT_ORDER\.length') `
+  "parser mora podržati BOM/CRLF/prazne redove i odbiti više od četiri ključa"
+Assert-True ($localFileParser -match 'key\.length\s*<\s*8[\s\S]{0,180}\[\\s\\u0000-\\u001f\\u007f\]') `
+  "parser mora odbiti neispravan red bez ispisivanja vrednosti ključa"
+Assert-True ($localFileImporter -match 'parseLocalApiKeyText\(await\s+file\.text\(\)\)[\s\S]{0,420}key:\s*keys\[index\]\s*\|\|\s*""[\s\S]{0,180}applyLocalApiProfiles\(profiles\)') `
+  "import mora lokalno pročitati fajl, isprazniti višak slotova i odmah koristiti zajednički save put"
+Assert-True ($localFileImporter -notmatch 'fetch\s*\(|XMLHttpRequest|sendBeacon|FormData|console\.') `
+  "uvoz fajla nikada ne sme slati ili logovati njegov sadržaj"
+Assert-True ((Count-Matches $localFileImportHandler 'localKeysFileInput\.value\s*=\s*""') -ge 2) `
+  "file input mora biti resetovan pre i posle uvoza radi ponovnog izbora istog fajla"
+Assert-True ((Count-Matches $source 'applyLocalApiProfiles\(profiles\)') -eq 3) `
+  "ručni Save i file import moraju deliti isti credential/interaction invalidation put"
 Assert-True ($source -match 'localStorage\.getItem\(LEGACY_PROFILES_STORAGE\)[\s\S]{0,760}localStorage\.getItem\(LEGACY_KEY_STORAGE\)[\s\S]{0,360}saveLocalApiProfiles\(migrated\)[\s\S]{0,180}localStorage\.removeItem\(LEGACY_KEY_STORAGE\)[\s\S]{0,120}localStorage\.removeItem\(LEGACY_PROFILES_STORAGE\)') `
   "stari lokalni ključevi moraju se prvo migrirati, pa tek onda ukloniti iz legacy storage-a"
-Assert-True ($source -match 'function\s+apiProfileId\s*\(profile\)[\s\S]{0,100}`\$\{profile\.transport\}:\$\{profile\.slot\}`') `
-  "interaction ID mora razlikovati gateway i local transport"
+Assert-True ($source -match 'function\s+apiProfileId\s*\(profile\)[\s\S]{0,180}profile\.transport\s*===\s*"local"[\s\S]{0,120}localApiBucketId\(profile\.key\)[\s\S]{0,100}`gateway:\$\{profile\.slot\}`') `
+  "lokalni interaction ID mora razlikovati transport, slot i konkretan ključ"
 Assert-True ($source -match 'previousInteractionProfileId\.startsWith\("local:"\)[\s\S]{0,100}saveCurrentInteractionId\("",\s*""\)') `
   "promena lokalnih ključeva mora poništiti lokalni previous interaction ID"
 
@@ -191,13 +244,19 @@ Assert-True ($gatewayFetch -match 'catch\s*\(err\)[\s\S]{0,260}gatewayHealthIsAv
   "početni mrežni kvar sme preći u infrastrukturalni fallback tek posle neuspešnog health probe-a"
 Assert-True ($gatewayFetch -match 'response\.headers\.get\(API_GATEWAY_MARKER_HEADER\)\s*!==\s*"1"[\s\S]{0,220}makeGatewayUnavailableError') `
   "neoznačen deployment/platform odgovor mora se klasifikovati kao gateway kvar"
-Assert-True ($gatewayFetch -match 'response\.ok[\s\S]{0,100}gatewayResponseReceivedDuringSolve\s*=\s*true') `
-  "označen uspešan gateway odgovor mora sprečiti kasniji cross-transport duplikat"
 Assert-True ($httpErrorClassifier -match '\["not_found",\s*"rate_control_unavailable"\]\.includes\(code\)[\s\S]{0,100}gatewayInfrastructureFailure\s*=\s*true') `
   "samo dokazano pre-upstream Worker stanje sme postati označen infrastrukturalni kvar"
-Assert-True ($phaseFlow -match 'phase\s*===\s*"gateway"\s*&&\s*!hasVisibleLiveOutput\(\)') `
-  "gateway u lokalnu fazu sme preći samo pre bilo kakvog vidljivog izlaza"
-Assert-True ($phaseFlow -match 'err\?\.gatewayTransportFailure[\s\S]{0,80}throw\s+err') `
+Assert-True ($solveProfiles -match 'const\s+phaseProfiles\s*=\s*profiles') `
+  "send mora zamrznuti samo jedan prethodno izabran local ili gateway profilni niz"
+Assert-True ($solveProfiles -notmatch 'getConfiguredLocalApiProfiles|getApiProfiles|phase\s*=') `
+  "solve ne sme menjati transport nakon početnog local-first izbora"
+Assert-True ($solveProfiles -match 'err\?\.gatewayTransportFailure\s*\|\|[\s\S]{0,100}err\?\.gatewayInfrastructureFailure[\s\S]{0,100}throw\s+err') `
+  "gateway transportni/infrastrukturni kvar mora stati bez prelaska na lokalni niz"
+Assert-True ($source -notmatch 'gatewayResponseReceivedDuringSolve') `
+  "stari gateway-u-local cross-transport state više ne sme postojati"
+Assert-True ($source -match 'profiles\s*=\s*getApiProfiles\(\)') `
+  "svaki Send mora jednom izabrati local-first ili gateway-only profile"
+Assert-True ($solveProfiles -match 'err\?\.gatewayTransportFailure[\s\S]{0,160}throw\s+err') `
   "transportni prekid posle gateway odgovora ne sme fan-outovati druge slotove"
 Assert-True ($streamInteraction -match 'reader\.read\(\)[\s\S]{0,260}catch\s*\(err\)[\s\S]{0,180}err\.gatewayTransportFailure\s*=\s*true') `
   "reader prekid označenog gateway streama mora postaviti transportni marker"
@@ -207,14 +266,6 @@ Assert-True ($source -match 'function\s+isStalePreviousInteractionError\s*\([\s\
   "gateway transportni prekid ne sme izgledati kao istekli interaction ID"
 Assert-True ((Count-Matches $source 'isRetriableDemandError\(err\)\s*&&\s*\r?\n\s*!err\?\.gatewayInfrastructureFailure\s*&&\s*\r?\n\s*!err\?\.gatewayTransportFailure') -eq 2) `
   "gateway transportni prekid ne sme pokrenuti nijedan isti-slot retry"
-Assert-True ($phaseFlow -match '!gatewayResponseReceivedDuringSolve\s*&&[\s\S]{0,120}gatewayInfrastructureFailure') `
-  "lokalna faza ne sme početi nakon što je upstream gateway odgovor već započet"
-Assert-True ($phaseFlow -match 'gatewayInfrastructureFailure\s*\|\|\s*\r?\n\s*allGatewaySlotsUnavailable[\s\S]{0,220}getConfiguredLocalApiProfiles\(\)') `
-  "lokalna faza sme početi samo zbog infrastrukture ili sva četiri nekonfigurisana gateway slota"
-Assert-True ($phaseFlow -match 'phase\s*=\s*"local"[\s\S]{0,100}phaseProfiles\s*=\s*localProfiles') `
-  "lokalna faza mora potpuno zameniti gateway profilni niz"
-Assert-True ($phaseFlow -notmatch 'saveCurrentInteractionId\("",\s*""\)[\s\S]{0,260}phase\s*=\s*"local"') `
-  "namespaced local interaction ID ne treba brisati pri svakom ponovljenom gateway kvaru"
 Assert-True ($source -match 'previousInteractionProfileId\s*===\s*profileId') `
   "previous interaction ID sme se koristiti samo sa istim namespaced profilom"
 Assert-True ($source -match 'rate_control_unavailable[\s\S]{0,80}return false') `
@@ -321,12 +372,12 @@ if (Test-Path -LiteralPath $localSecretFile) {
 
 Assert-True ($loader -notmatch 'window\.fetch\s*=|AbortSignal\.timeout|realSetTimeout') `
   "loader više ne sme sadržati Stop monkeypatch"
-Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=18') -eq 9) `
-  "loader mora koristiti svih 9 chunk URL-ova sa v=18"
-Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v24"') `
-  "service worker cache mora biti v24"
-Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=18') -eq 9) `
-  "service worker mora keširati svih 9 chunk URL-ova sa v=18"
+Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=19') -eq 9) `
+  "loader mora koristiti svih 9 chunk URL-ova sa v=19"
+Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v25"') `
+  "service worker cache mora biti v25"
+Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=19') -eq 9) `
+  "service worker mora keširati svih 9 chunk URL-ova sa v=19"
 
 & (Join-Path $PSScriptRoot "build-math-app.ps1") -CheckOnly | Out-Null
 Write-Output "Sve statičke provere matematičke aplikacije su prošle."

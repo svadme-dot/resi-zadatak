@@ -1327,6 +1327,26 @@ window.MathJax = {
     color:var(--accentText);
     font-weight:850
   }
+  .localApiImportBtn{
+    width:100%;
+    border:1px solid #34435a;
+    border-radius:13px;
+    padding:12px;
+    background:#121a27;
+    color:#dce8fb;
+    font-weight:800;
+  }
+  .localApiImportBtn:hover{
+    border-color:#4b6384;
+    background:#172234;
+  }
+  .localApiStatus{
+    min-height:18px;
+    margin:9px 2px 0!important;
+    color:#8fb8ee!important;
+    font-size:12px!important;
+  }
+  .localApiStatus.error{color:#ff9d9d!important}
   .note{margin-top:10px!important;font-size:11px!important}
 
 
@@ -1861,6 +1881,17 @@ window.MathJax = {
 
   html[data-theme="light"] .apiSlotHead strong{color:#263247}
   html[data-theme="light"] .apiSlotHead span{color:#748196}
+  html[data-theme="light"] .localApiImportBtn{
+    border-color:#c9d5e5;
+    background:#eef4fb;
+    color:#263c59;
+  }
+  html[data-theme="light"] .localApiImportBtn:hover{
+    border-color:#aebed3;
+    background:#e6eef8;
+  }
+  html[data-theme="light"] .localApiStatus{color:#41658f!important}
+  html[data-theme="light"] .localApiStatus.error{color:#b23b3b!important}
 
   @media (max-width:620px){
     .historyBack{
@@ -2488,7 +2519,7 @@ window.MathJax = {
     </p>
 
     <button id="openLocalApiSettings" class="settingsAdvancedBtn" type="button">
-      Lokalna API rezerva
+      Lokalni API ključevi
       <span>›</span>
     </button>
   </div>
@@ -2502,15 +2533,20 @@ window.MathJax = {
       <button id="localApiClose" class="googleApiNavBtn googleApiCloseBtn" type="button" title="Zatvori" aria-label="Zatvori">×</button>
     </div>
     <p>
-      Cloudflare je primarni i preporučeni put. Ovi ključevi su potpuno opcioni:
-      ako Cloudflare gateway nije dostupan pre početka odgovora, aplikacija može
-      direktno da proba <b>Gemini 3.6 Flash</b> redom 1 → 2 → 3 → 4.
-      Prazan slot se preskače.
+      Ako sačuvaš bar jedan ključ, aplikacija direktno koristi
+      <b>Gemini 3.6 Flash</b> redom 1 → 2 → 3 → 4, a prazan slot preskače.
+      Cloudflare se koristi samo kada ovde nema nijednog lokalnog ključa.
     </p>
+
+    <input id="localKeysFile" type="file" accept=".txt,text/plain" hidden>
+    <button id="importLocalKeys" class="localApiImportBtn" type="button">
+      Uvezi i sačuvaj api_keys.txt
+    </button>
+    <p id="localImportStatus" class="localApiStatus" role="status" aria-live="polite"></p>
 
     <div class="apiSlots">
       <label class="apiSlot">
-        <span class="apiSlotHead"><strong>API ključ 1</strong><span>prva lokalna rezerva</span></span>
+        <span class="apiSlotHead"><strong>API ključ 1</strong><span>prvi lokalni pokušaj</span></span>
         <input id="localKey1" class="field" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="API ključ 1">
       </label>
 
@@ -2525,17 +2561,17 @@ window.MathJax = {
       </label>
 
       <label class="apiSlot">
-        <span class="apiSlotHead"><strong>API ključ 4</strong><span>poslednja rezerva</span></span>
+        <span class="apiSlotHead"><strong>API ključ 4</strong><span>poslednji lokalni pokušaj</span></span>
         <input id="localKey4" class="field" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="API ključ 4">
       </label>
     </div>
 
-    <button id="saveLocalKeys" class="primary" type="button">Sačuvaj lokalnu rezervu</button>
+    <button id="saveLocalKeys" class="primary" type="button">Sačuvaj lokalne ključeve</button>
     <p class="note">
-      Ključevi ostaju samo u localStorage-u ovog browsera i nisu obavezni.
-      Direktni rezervni poziv može da ih prikaže u browser DevTools-u; koristi
-      ograničene ključeve namenjene samo ovom sajtu. Brisanjem sva četiri polja
-      potpuno isključuješ lokalnu rezervu.
+      Uvezeni fajl se čita samo na ovom uređaju i nigde se ne šalje. Ključevi
+      ostaju u localStorage-u ovog browsera. Direktni poziv može da ih prikaže
+      u browser DevTools-u; koristi ograničene ključeve namenjene samo ovom
+      sajtu. Brisanjem sva četiri polja vraćaš Cloudflare kao primarni put.
     </p>
   </div>
 </div>
@@ -2546,6 +2582,7 @@ window.MathJax = {
 
   const IMAGE_MEDIA_RESOLUTION = "high";
   const MAX_API_IMAGE_BYTES = 1536 * 1024;
+  const MAX_LOCAL_API_FILE_BYTES = 16 * 1024;
   const LOCAL_GATEWAY_OVERRIDE =
     ["127.0.0.1", "localhost"].includes(location.hostname) &&
     new URLSearchParams(location.search).has("scenario")
@@ -2645,12 +2682,14 @@ window.MathJax = {
   const localKeyInputs = API_SLOT_ORDER.map(slot =>
     el(`localKey${slot}`)
   );
+  const localKeysFileInput = el("localKeysFile");
+  const localImportStatus = el("localImportStatus");
 
   let busy = false;
   let sendPreparing = false;
+  let localApiImportInProgress = false;
   let activeSolveController = null;
   let userStopRequested = false;
-  let gatewayResponseReceivedDuringSolve = false;
   let stopButtonHideTimer = null;
   let selectedImage = null;
 
@@ -3756,6 +3795,46 @@ window.MathJax = {
     settingsOverlay.classList.remove("show");
   }
 
+  function setLocalImportStatus(text = "", error = false) {
+    localImportStatus.textContent = text;
+    localImportStatus.classList.toggle("error", error);
+  }
+
+  function parseLocalApiKeyText(rawText) {
+    const text = String(rawText ?? "").replace(/^\uFEFF/, "");
+
+    if (text.length > MAX_LOCAL_API_FILE_BYTES) {
+      throw new Error("Fajl je prevelik. Izaberi mali tekstualni fajl sa najviše četiri ključa.");
+    }
+
+    const keys = text
+      .split(/\r\n|\n|\r/)
+      .map(line => line.trim())
+      .filter(Boolean);
+
+    if (!keys.length) {
+      throw new Error("Fajl ne sadrži nijedan API ključ.");
+    }
+    if (keys.length > API_SLOT_ORDER.length) {
+      throw new Error("Fajl može da sadrži najviše četiri API ključa.");
+    }
+    if (
+      keys.some(
+        key =>
+          key.length < 8 ||
+          key.length > 512 ||
+          /[\s\u0000-\u001f\u007f]/.test(key)
+      )
+    ) {
+      throw new Error("Fajl sadrži neispravan red za API ključ.");
+    }
+    if (new Set(keys).size !== keys.length) {
+      throw new Error("Fajl sadrži isti API ključ više puta.");
+    }
+
+    return keys;
+  }
+
   function normalizeLocalApiProfile(raw, slot) {
     return {
       transport: "local",
@@ -3832,6 +3911,53 @@ window.MathJax = {
     return loadLocalApiProfiles().filter(profile => profile.key);
   }
 
+  function applyLocalApiProfiles(profiles) {
+    const previous = loadLocalApiProfiles();
+    const saved = saveLocalApiProfiles(profiles);
+    const changed = saved.some(
+      (profile, index) =>
+        profile.key !== String(previous[index]?.key || "")
+    );
+
+    if (changed) {
+      if (previousInteractionProfileId.startsWith("local:")) {
+        saveCurrentInteractionId("", "");
+      }
+      for (const chat of chats) {
+        if (String(chat.interactionProfileId || "").startsWith("local:")) {
+          chat.interactionId = "";
+          chat.interactionProfileId = "";
+        }
+      }
+      persistChats();
+    }
+
+    return {
+      saved,
+      changed,
+      configured: saved.filter(profile => profile.key).length
+    };
+  }
+
+  async function importLocalApiKeyFile(file) {
+    if (!file) return null;
+    if (file.size > MAX_LOCAL_API_FILE_BYTES) {
+      throw new Error("Fajl je prevelik. Izaberi mali tekstualni fajl sa najviše četiri ključa.");
+    }
+
+    const keys = parseLocalApiKeyText(await file.text());
+    if (busy || sendPreparing) {
+      throw new Error("Sačekaj da se trenutni odgovor završi pa ponovi uvoz.");
+    }
+    const profiles = API_SLOT_ORDER.map((slot, index) => ({
+      transport: "local",
+      slot,
+      key: keys[index] || ""
+    }));
+
+    return applyLocalApiProfiles(profiles);
+  }
+
   function populateLocalApiDialog() {
     const profiles = loadLocalApiProfiles();
     for (let i = 0; i < localKeyInputs.length; i++) {
@@ -3840,7 +3966,7 @@ window.MathJax = {
   }
 
   function openLocalApiDialog() {
-    if (busy || sendPreparing) {
+    if (busy || sendPreparing || localApiImportInProgress) {
       setStatus(
         "Sačekaj da se trenutni odgovor završi pre promene lokalnih ključeva.",
         true
@@ -3849,6 +3975,7 @@ window.MathJax = {
     }
     closeSettings();
     populateLocalApiDialog();
+    setLocalImportStatus("");
     keyOverlay.classList.add("show");
   }
 
@@ -3884,6 +4011,9 @@ window.MathJax = {
   }
 
   function getApiProfiles() {
+    const localProfiles = getConfiguredLocalApiProfiles();
+    if (localProfiles.length) return localProfiles;
+
     return API_SLOT_ORDER.map(slot => ({
       transport: "gateway",
       slot
@@ -3891,7 +4021,10 @@ window.MathJax = {
   }
 
   function apiProfileId(profile) {
-    return `${profile.transport}:${profile.slot}`;
+    if (profile.transport === "local") {
+      return `local:${profile.slot}:${localApiBucketId(profile.key)}`;
+    }
+    return `gateway:${profile.slot}`;
   }
 
   function setStatus(text = "", error = false) {
@@ -3938,7 +4071,6 @@ window.MathJax = {
     }
 
     userStopRequested = false;
-    gatewayResponseReceivedDuringSolve = false;
     activeSolveController = new AbortController();
     stopGenerationBtn.textContent = "■ Stop";
     stopGenerationBtn.disabled = false;
@@ -6016,10 +6148,6 @@ window.MathJax = {
       );
     }
 
-    if (response.ok) {
-      gatewayResponseReceivedDuringSolve = true;
-    }
-
     return response;
   }
 
@@ -6071,30 +6199,6 @@ window.MathJax = {
     err.code = code;
     err.transport = profile.transport;
     err.gatewayResponseReceived = profile.transport === "gateway";
-    if (
-      profile.transport === "gateway" &&
-      ![
-        "not_found",
-        "slot_unavailable",
-        "slot_rate_limited",
-        "rate_control_unavailable",
-        "origin_not_allowed",
-        "preflight_not_allowed",
-        "method_not_allowed",
-        "unsupported_media_type",
-        "invalid_slot",
-        "forbidden_header",
-        "invalid_request",
-        "invalid_json",
-        "invalid_input",
-        "invalid_image",
-        "text_too_large",
-        "image_too_large",
-        "request_too_large"
-      ].includes(code)
-    ) {
-      gatewayResponseReceivedDuringSolve = true;
-    }
     if (
       profile.transport === "gateway" &&
       ["not_found", "rate_control_unavailable"].includes(code)
@@ -6732,7 +6836,7 @@ window.MathJax = {
   }
 
   async function send() {
-    if (busy || sendPreparing) return;
+    if (busy || sendPreparing || localApiImportInProgress) return;
 
     sendPreparing = true;
     sendBtn.disabled = true;
@@ -6885,13 +6989,9 @@ window.MathJax = {
     let solved = false;
 
     try {
-      let phase = "gateway";
-      let phaseProfiles = profiles;
-      let gatewayInfrastructureFailure = false;
-      const gatewayFailureErrors = [];
+      const phaseProfiles = profiles;
 
-      while (!solved) {
-        for (let index = 0; index < phaseProfiles.length; index++) {
+      for (let index = 0; index < phaseProfiles.length; index++) {
           const profile = phaseProfiles[index];
           const profileId = apiProfileId(profile);
           const isLocal = profile.transport === "local";
@@ -6904,7 +7004,7 @@ window.MathJax = {
 
           setStatus(
             isLocal
-              ? `Lokalna rezerva · API ${profile.slot}…`
+              ? `Lokalni API · ključ ${profile.slot}…`
               : `AI servis · pokušaj ${profile.slot}…`
           );
 
@@ -6937,7 +7037,11 @@ window.MathJax = {
                 );
               }
 
-              setStatus("AI servis · dovršavam odgovor…");
+              setStatus(
+                isLocal
+                  ? "Lokalni API · dovršavam odgovor…"
+                  : "AI servis · dovršavam odgovor…"
+              );
 
               result =
                 await requestInteractionOnceWithRetry(
@@ -7000,7 +7104,7 @@ window.MathJax = {
 
             if (isLocal) {
               setStatus(
-                `Rešeno lokalnom rezervom · API ${profile.slot}`
+                `Rešeno lokalno · ključ ${profile.slot}`
               );
             } else if (index === 0) {
               setStatus("");
@@ -7034,16 +7138,11 @@ window.MathJax = {
             );
 
             if (!isLocal) {
-              if (err?.gatewayTransportFailure) {
-                throw err;
-              }
-              gatewayFailureErrors.push(err);
               if (
-                err?.gatewayInfrastructureFailure &&
-                !hasVisibleLiveOutput()
+                err?.gatewayTransportFailure ||
+                err?.gatewayInfrastructureFailure
               ) {
-                gatewayInfrastructureFailure = true;
-                break;
+                throw err;
               }
             }
 
@@ -7059,40 +7158,6 @@ window.MathJax = {
               await sleep(650, solveSignal);
             }
           }
-        }
-
-        if (solved) break;
-
-        if (phase === "gateway" && !hasVisibleLiveOutput()) {
-          const allGatewaySlotsUnavailable =
-            gatewayFailureErrors.length === phaseProfiles.length &&
-            gatewayFailureErrors.every(err =>
-              String(err?.code || "") === "slot_unavailable"
-            );
-
-          if (
-            !gatewayResponseReceivedDuringSolve &&
-            (
-              gatewayInfrastructureFailure ||
-              allGatewaySlotsUnavailable
-            )
-          ) {
-            const localProfiles = getConfiguredLocalApiProfiles();
-            if (localProfiles.length) {
-              resetLiveModelForRetry(
-                "Cloudflare nije dostupan — prelazim na lokalnu rezervu…"
-              );
-              setStatus(
-                "Cloudflare nije dostupan — koristim lokalnu rezervu…"
-              );
-              phase = "local";
-              phaseProfiles = localProfiles;
-              continue;
-            }
-          }
-        }
-
-        break;
       }
 
       if (!solved) {
@@ -7173,8 +7238,53 @@ window.MathJax = {
     }
   }
 
+  el("importLocalKeys").addEventListener("click", () => {
+    if (busy || sendPreparing || localApiImportInProgress) {
+      setLocalImportStatus(
+        "Sačekaj da se trenutna radnja završi pa ponovi uvoz.",
+        true
+      );
+      return;
+    }
+    setLocalImportStatus("");
+    localKeysFileInput.value = "";
+    localKeysFileInput.click();
+  });
+
+  localKeysFileInput.addEventListener("change", async () => {
+    const file = localKeysFileInput.files?.[0] || null;
+    if (!file) return;
+
+    const importButton = el("importLocalKeys");
+    const saveButton = el("saveLocalKeys");
+    localApiImportInProgress = true;
+    importButton.disabled = true;
+    saveButton.disabled = true;
+    setLocalImportStatus("Uvozim i lokalno čuvam ključeve…");
+
+    try {
+      const result = await importLocalApiKeyFile(file);
+      for (let index = 0; index < localKeyInputs.length; index++) {
+        localKeyInputs[index].value = result.saved[index]?.key || "";
+      }
+      setLocalImportStatus(
+        `Uvezeno i sačuvano lokalnih API ključeva: ${result.configured}. Lokalni režim je sada primaran.`
+      );
+    } catch (err) {
+      setLocalImportStatus(
+        err?.message || "Fajl nije mogao lokalno da se uveze.",
+        true
+      );
+    } finally {
+      localKeysFileInput.value = "";
+      localApiImportInProgress = false;
+      importButton.disabled = false;
+      saveButton.disabled = false;
+    }
+  });
+
   el("saveLocalKeys").addEventListener("click", () => {
-    if (busy || sendPreparing) {
+    if (busy || sendPreparing || localApiImportInProgress) {
       setStatus(
         "Sačekaj da se trenutni odgovor završi pre promene lokalnih ključeva.",
         true
@@ -7182,44 +7292,25 @@ window.MathJax = {
       return;
     }
     try {
-      const previous = loadLocalApiProfiles();
       const profiles = API_SLOT_ORDER.map((slot, index) => ({
         transport: "local",
         slot,
         key: localKeyInputs[index].value.trim()
       }));
-      const changed = profiles.some(
-        (profile, index) =>
-          profile.key !== String(previous[index]?.key || "")
-      );
-      const saved = saveLocalApiProfiles(profiles);
-      const configured = saved.filter(profile => profile.key).length;
-
-      if (changed) {
-        if (previousInteractionProfileId.startsWith("local:")) {
-          saveCurrentInteractionId("", "");
-        }
-        for (const chat of chats) {
-          if (String(chat.interactionProfileId || "").startsWith("local:")) {
-            chat.interactionId = "";
-            chat.interactionProfileId = "";
-          }
-        }
-        persistChats();
-      }
+      const { configured } = applyLocalApiProfiles(profiles);
 
       closeLocalApiDialog();
       openSettings();
       setStatus(
         configured
-          ? `Sačuvano lokalnih API ključeva: ${configured}.`
-          : "Lokalna API rezerva je isključena."
+          ? `Sačuvano lokalnih API ključeva: ${configured}. Lokalni režim je primaran.`
+          : "Lokalni ključevi su uklonjeni; koristi se Cloudflare."
       );
       setTimeout(() => {
         if (!busy) setStatus("");
       }, 1800);
     } catch {
-      setStatus(
+      setLocalImportStatus(
         "Browser nije mogao lokalno da sačuva API ključeve.",
         true
       );

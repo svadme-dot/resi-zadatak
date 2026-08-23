@@ -1,18 +1,18 @@
-const CACHE_NAME = "matematika-pwa-v24";
+const CACHE_NAME = "matematika-pwa-v25";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./icon.svg",
-  "./app-v5/part-0.txt?v=18",
-  "./app-v5/part-1.txt?v=18",
-  "./app-v5/part-2.txt?v=18",
-  "./app-v5/part-3.txt?v=18",
-  "./app-v5/part-4.txt?v=18",
-  "./app-v5/part-5a.txt?v=18",
-  "./app-v5/part-5b.txt?v=18",
-  "./app-v5/part-6.txt?v=18",
-  "./app-v5/part-7.txt?v=18"
+  "./app-v5/part-0.txt?v=19",
+  "./app-v5/part-1.txt?v=19",
+  "./app-v5/part-2.txt?v=19",
+  "./app-v5/part-3.txt?v=19",
+  "./app-v5/part-4.txt?v=19",
+  "./app-v5/part-5a.txt?v=19",
+  "./app-v5/part-5b.txt?v=19",
+  "./app-v5/part-6.txt?v=19",
+  "./app-v5/part-7.txt?v=19"
 ];
 
 self.addEventListener("install", event => {

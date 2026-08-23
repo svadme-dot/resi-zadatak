@@ -145,6 +145,179 @@ async function withServer(run) {
   }
 }
 
+async function frontendSource() {
+  return readFile(
+    new URL('../../src/math-app.html', import.meta.url),
+    'utf8'
+  );
+}
+
+function sourceSlice(source, startMarker, endMarker) {
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf(endMarker, start);
+  assert.ok(start >= 0 && end > start, 'expected frontend source slice');
+  return source.slice(start, end);
+}
+
+test('local API file parser accepts 1-4 safe lines and rejects invalid input', async () => {
+  const source = await frontendSource();
+  const parserSource = sourceSlice(
+    source,
+    '  function parseLocalApiKeyText',
+    '  function normalizeLocalApiProfile'
+  );
+  const parse = new Function(
+    'MAX_LOCAL_API_FILE_BYTES',
+    'API_SLOT_ORDER',
+    parserSource + '\nreturn parseLocalApiKeyText;'
+  )(16 * 1024, Object.freeze([1, 2, 3, 4]));
+
+  const keys = [
+    'fake-local-key-1',
+    'fake-local-key-2',
+    'fake-local-key-3',
+    'fake-local-key-4'
+  ];
+  assert.deepEqual(
+    parse('\uFEFF' + keys[0] + '\r\n\r\n' + keys[1] + '\n' + keys[2] + '\r' + keys[3] + '\n'),
+    keys
+  );
+  assert.deepEqual(parse(keys[0]), [keys[0]]);
+  assert.throws(() => parse(' \r\n\n '), /nijedan API ključ/);
+  assert.throws(() => parse([...keys, 'fake-local-key-5'].join('\n')), /najviše četiri/);
+  assert.throws(() => parse('fake local key'), /neispravan red/);
+  assert.throws(() => parse('fake-local\u0000-key'), /neispravan red/);
+  assert.throws(() => parse(keys[0] + '\n' + keys[0]), /više puta/);
+});
+
+test('file import replaces all slots and local profiles fully replace gateway selection', async () => {
+  const source = await frontendSource();
+  const parserSource = sourceSlice(
+    source,
+    '  function parseLocalApiKeyText',
+    '  function normalizeLocalApiProfile'
+  );
+  const parse = new Function(
+    'MAX_LOCAL_API_FILE_BYTES',
+    'API_SLOT_ORDER',
+    parserSource + '\nreturn parseLocalApiKeyText;'
+  )(16 * 1024, Object.freeze([1, 2, 3, 4]));
+  const importerSource = sourceSlice(
+    source,
+    '  async function importLocalApiKeyFile',
+    '  function populateLocalApiDialog'
+  );
+  const applied = [];
+  const importFile = new Function(
+    'MAX_LOCAL_API_FILE_BYTES',
+    'API_SLOT_ORDER',
+    'parseLocalApiKeyText',
+    'applyLocalApiProfiles',
+    'busy',
+    'sendPreparing',
+    importerSource + '\nreturn importLocalApiKeyFile;'
+  )(
+    16 * 1024,
+    Object.freeze([1, 2, 3, 4]),
+    parse,
+    profiles => {
+      applied.push(structuredClone(profiles));
+      return { saved: profiles, configured: profiles.filter(item => item.key).length };
+    },
+    false,
+    false
+  );
+
+  const imported = await importFile({
+    size: 64,
+    text: async () => 'fake-local-key-1\nfake-local-key-2\n'
+  });
+  assert.equal(imported.configured, 2);
+  assert.deepEqual(
+    applied[0].map(profile => [profile.transport, profile.slot, profile.key]),
+    [
+      ['local', 1, 'fake-local-key-1'],
+      ['local', 2, 'fake-local-key-2'],
+      ['local', 3, ''],
+      ['local', 4, '']
+    ]
+  );
+  await assert.rejects(
+    importFile({
+      size: 128,
+      text: async () => [1, 2, 3, 4, 5].map(n => 'fake-local-key-' + n).join('\n')
+    }),
+    /najviše četiri/
+  );
+  let oversizedFileRead = false;
+  await assert.rejects(
+    importFile({
+      size: 16 * 1024 + 1,
+      text: async () => {
+        oversizedFileRead = true;
+        return 'fake-local-key-1';
+      }
+    }),
+    /prevelik/
+  );
+  assert.equal(oversizedFileRead, false);
+  assert.equal(applied.length, 1);
+
+  const selectionSource = sourceSlice(
+    source,
+    '  function getApiProfiles()',
+    '  function apiProfileId'
+  );
+  const selectProfiles = localProfiles => new Function(
+    'API_SLOT_ORDER',
+    'getConfiguredLocalApiProfiles',
+    selectionSource + '\nreturn getApiProfiles();'
+  )(
+    Object.freeze([1, 2, 3, 4]),
+    () => localProfiles
+  );
+  const sparseLocal = [applied[0][1], applied[0][3]].map((profile, index) => ({
+    ...profile,
+    key: 'sparse-local-key-' + index
+  }));
+  assert.deepEqual(selectProfiles(sparseLocal), sparseLocal);
+  assert.deepEqual(
+    selectProfiles([]),
+    [1, 2, 3, 4].map(slot => ({ transport: 'gateway', slot }))
+  );
+
+  const profileIdSource = sourceSlice(
+    source,
+    '  function apiProfileId',
+    '  function setStatus'
+  );
+  const bucketIdSource = sourceSlice(
+    source,
+    '  function localApiBucketId',
+    '  let localRateMemoryState'
+  );
+  const profileId = new Function(
+    bucketIdSource + '\n' + profileIdSource + '\nreturn apiProfileId;'
+  )();
+  assert.equal(profileId({ transport: 'gateway', slot: 2 }), 'gateway:2');
+  const oldCredentialId = profileId({
+    transport: 'local',
+    slot: 1,
+    key: 'fake-local-key-old'
+  });
+  const newCredentialId = profileId({
+    transport: 'local',
+    slot: 1,
+    key: 'fake-local-key-new'
+  });
+  assert.match(oldCredentialId, /^local:1:[^:]+:\d+$/);
+  assert.notEqual(oldCredentialId, newCredentialId);
+  assert.equal(
+    oldCredentialId,
+    profileId({ transport: 'local', slot: 1, key: 'fake-local-key-old' })
+  );
+});
+
 test('serves an injected app without modifying the production file', async () => {
   await withServer(async base => {
     const response = await fetch(base + '/docs/?scenario=success&fresh=1');
@@ -878,7 +1051,7 @@ test('reload retry oracle rejects changed prompt, image, or API 2', async () => 
 
 test('browser local limiter admits ten fixed-clock calls and blocks the eleventh before upstream', async () => {
   await withServer(async (base, harness) => {
-    const scenario = 'gateway-rate-control-local';
+    const scenario = 'local-limiter-fixed-clock';
     const run = 'fixed-clock-local-limit';
     const fakeKey = 'e2e-local-api-1';
     const fixedNow = 1_787_496_000_000;
@@ -943,30 +1116,6 @@ test('browser local limiter admits ten fixed-clock calls and blocks the eleventh
       localStorage,
       navigator,
       FrozenDate
-    );
-
-    const gatewayResponse = await fetch(
-      base +
-        '/__mock/gateway/v1/interactions?scenario=' + scenario +
-        '&run=' + run,
-      {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          'X-Math-Api-Slot': '1'
-        },
-        body: JSON.stringify({
-          input: validSolverBody.input,
-          stream: false
-        })
-      }
-    );
-    assert.equal(gatewayResponse.status, 503);
-    assert.equal(gatewayResponse.headers.get('x-math-gateway'), '1');
-    assert.equal(
-      (await gatewayResponse.json()).error.code,
-      'rate_control_unavailable'
     );
 
     const localBody = {

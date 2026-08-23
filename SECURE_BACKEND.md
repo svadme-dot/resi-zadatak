@@ -23,7 +23,13 @@ otvarano niti aktivirano.
 
 ## Arhitektura
 
+Kada nema lokalnih ključeva:
+
 `GitHub Pages -> Cloudflare Worker -> Gemini Interactions API`
+
+Kada je u Settings sačuvan bar jedan lokalni ključ:
+
+`GitHub Pages -> direktni browser API poziv`
 
 Worker koristi jedan SQLite Durable Object `RateCoordinator` kao globalni,
 atomarni koordinator limita. Browser šalje samo sadržaj zadatka i neutralni broj
@@ -33,21 +39,27 @@ pa tek nakon uspešne rezervacije šalje jedan upstream poziv.
 
 Frontend zadržava postojeću retry/fallback state mašinu kako bi thinking,
 parcijalni odgovor, Stop i `previous_interaction_id` nastavili da rade isto.
-Redosled je uvek KEY1 -> KEY2 -> KEY3 -> KEY4; nema random ili round-robin
-izbora. Browser nikada ne dobija vrednost server-side Worker ključa.
+Redosled je uvek slot 1 -> 2 -> 3 -> 4; nema random ili round-robin izbora.
 
-Kao neobavezna rezerva, Settings sada može lokalno da zapamti 1-4 zasebna API
-ključa. Ova druga faza se ne koristi za normalne upstream greške, kvotu,
-timeout, grešku ključa ili server-side rate limit. Aktivira se samo pre početka
-odgovora kada frontend pouzdano utvrdi da Cloudflare gateway/deployment ili
-njegov rate koordinator nisu dostupni, odnosno kada sva četiri Worker slota nisu
-konfigurisana. Worker svaki svoj odgovor označava headerom `X-Math-Gateway: 1`,
-pa obična AI greška iz zdravog gateway-a ne može neprimetno da zaobiđe server.
+Settings može lokalno da zapamti 1-4 zasebna API ključa, ručnim unosom ili
+eksplicitnim izborom lokalnog `api_keys.txt` fajla. Fajl se čita kroz browser
+`File.text()`, nikada se ne uploaduje i uspešan import odmah menja sva četiri
+slota, prazneći neiskorišćene. Ako postoji bar jedan lokalni ključ, samo lokalni
+slotovi učestvuju u tom zahtevu i Cloudflare/health se uopšte ne pozivaju. Ako
+nema nijednog lokalnog ključa ili je lokalni storage izgubljen/nedostupan, samo
+četiri neutralna Worker slota učestvuju. Ne postoji automatski prelaz između
+transporta usred istog zahteva.
+
+Browser nikada ne dobija vrednost server-side Worker ključa. Lokalni ključevi
+postoje u browseru isključivo zato što ih je vlasnik ručno uneo ili lokalno
+izabrao fajl.
 
 Gateway i lokalni interaction ID-jevi imaju odvojene identitete (`gateway:1`
-naspram `local:1`). ID se šalje samo istom namespaced profilu: važeći lokalni ID
-može nastaviti lokalni razgovor, dok se ID drugog transporta nikada ne šalje i
-kontekst se tada bezbedno obnavlja iz lokalne istorije razgovora.
+naspram `local:1:<otisak-ključa>`). Lokalni ID je vezan i za bezbedan,
+lokalni otisak koji ne sadrži sam ključ, pa promena ključa u drugoj otvorenoj
+kartici ne može poslati stari interaction ID sa novim ključem. ID se šalje samo
+istom namespaced profilu; u ostalim slučajevima kontekst se bezbedno obnavlja iz
+lokalne istorije razgovora.
 
 ## Secrets
 
@@ -138,7 +150,7 @@ je prošao čitanje, JSON parse i image validaciju, a zatim očekivano odbijen p
 Durable Object/upstream faze; nije dobijen Cloudflare 1102. Ovo je praktična
 provera trenutne putanje, ne garancija za svaki budući payload ili runtime.
 
-### Ograničenje lokalne rezerve
+### Ograničenje lokalnog režima
 
 Direktan browser poziv ne prolazi kroz Durable Object, pa serverski globalni
 hard limit ne može obuhvatiti lokalne ključeve. Frontend zato pre svakog stvarnog
@@ -149,22 +161,17 @@ bucket. Rezervacija se ne vraća posle greške.
 
 Ovo je samo best-effort zaštita jednog browser origin-a: korisnik može obrisati
 storage, drugi uređaj nema isti brojač, a isti ključ korišćen i kroz Worker i
-direktno nema zajednički zbir. Zato se za lokalnu rezervu ne tvrdi da ispunjava
-globalni server-side hard cap. Ona se koristi samo kada gateway nije dostupan,
-a za strogu garanciju treba je ostaviti praznu.
+direktno nema zajednički zbir. Zato se za lokalni režim ne tvrdi da ispunjava
+globalni server-side hard cap. Kada postoje lokalni ključevi, lokalni režim je
+primaran; za strogu serversku garanciju treba ih ostaviti prazne i koristiti
+isključivo Worker.
 
-Postoji i neizbežna at-most-once neizvesnost: ako browser izgubi POST vezu pre
-nego što dobije bilo kakav HTTP odgovor, ne može dokazati da li je Worker već
-rezervisao i poslao upstream zahtev. Frontend tada proverava označeni `/health`;
-ako je gateway dostupan, ne prelazi lokalno niti fan-outuje druge slotove. Ako su
-i POST i health nedostupni, opcioni lokalni pokušaj može ipak uslediti, pa u
-retkom prekidu tačno između prijema zahteva i odgovora mogu postojati dve
-obračunate rezervacije. Bez upstream idempotency podrške to se ne može potpuno
-ukloniti. Isto ograničenje važi za postojeći compatibility recovery: ako se
-označeni stream tiho završi bez completion događaja i bez prikazanog sadržaja,
-frontend može poslati jedan novi sync zahtev da povrati rezultat. Svaki takav
-poziv se zasebno rezerviše i može predstavljati drugi obračunati upstream
-pokušaj, čak i ako je prvi zahtev bio prihvaćen pre tihog prekida.
+Postoji i neizbežna at-most-once neizvesnost unutar izabranog transporta: ako se
+stream tiho završi bez completion događaja i bez prikazanog sadržaja, frontend
+može poslati jedan novi sync zahtev da povrati rezultat. Svaki takav poziv se
+zasebno rezerviše i može predstavljati drugi obračunati upstream pokušaj, čak i
+ako je prvi zahtev bio prihvaćen pre tihog prekida. Frontend nikada zbog tog
+prekida ne prelazi sa lokalnog transporta na Cloudflare niti obrnuto.
 
 ## Security zaštite
 
@@ -187,9 +194,10 @@ stvarnu autentikaciju, što bi promenilo traženo iskustvo „otvori link i kori
 Opcioni lokalni ključevi imaju drugačiji bezbednosni profil: vrednosti su u
 localStorage-u, dostupne su kodu stranice, ekstenzijama i DevTools-u, a direktni
 Network zahtev nužno prikazuje ključ, endpoint i interni model/config. Ključevi
-se nikada ne uvoze automatski iz `api_keys.txt`, ne ulaze u build, chat, URL ili
-Git i moraju biti ručno uneti samo ako vlasnik želi ovu rezervu. Za takav ključ
-treba postaviti tačan GitHub Pages referrer i ograničiti ga samo na potreban API.
+se nikada ne preuzimaju sa Cloudflare-a niti uvoze bez korisnikovog file picker
+gesta. Izabrani `api_keys.txt` se čita samo lokalno, a njegov sadržaj se ne šalje
+na mrežu. Ključevi ne ulaze u build, chat, URL ili Git. Za takav ključ treba
+postaviti tačan GitHub Pages referrer i ograničiti ga samo na potreban API.
 Naziv servisa ostaje vidljiv u normalnom UI-ju samo unutar ekrana za API ključeve;
 DevTools ne može sakriti podatke direktnog browser zahteva.
 
@@ -206,6 +214,10 @@ ZIP ima 38 stavki, 154.768 B i SHA-256
 Stanje sa bezbednim Worker backendom, ali pre opcione lokalne rezerve, sačuvano
 je tagom `backup-before-local-api-fallback` na commitu
 `0bd629d1e8bc0f01c37591e3e8a9ced48e42bf67`.
+
+Poslednje produkcijsko stanje pre file importa i local-first režima sačuvano je
+tagom `backup-before-local-first-import` na commitu
+`6cf401bff80a8505d7d707a0dcbba8fc4e0f1811`.
 
 Za rollback samo lokalne rezerve, bez gubitka secure backend izmene:
 
