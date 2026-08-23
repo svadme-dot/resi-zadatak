@@ -1,5 +1,7 @@
 import {
   DEFAULT_UPSTREAM_TIMEOUT_MS,
+  GATEWAY_MARKER_HEADER,
+  GATEWAY_MARKER_VALUE,
   HEALTH_PATH,
   MAX_SYNC_RESPONSE_BYTES,
   MAX_UPSTREAM_ERROR_BYTES,
@@ -31,6 +33,7 @@ const FORBIDDEN_CLIENT_HEADERS = [
 function baseHeaders() {
   return new Headers({
     "Cache-Control": "no-store",
+    [GATEWAY_MARKER_HEADER]: GATEWAY_MARKER_VALUE,
     "X-Content-Type-Options": "nosniff"
   });
 }
@@ -38,7 +41,10 @@ function baseHeaders() {
 function addCors(headers, origin) {
   if (!origin) return headers;
   headers.set("Access-Control-Allow-Origin", origin);
-  headers.set("Access-Control-Expose-Headers", "Retry-After");
+  headers.set(
+    "Access-Control-Expose-Headers",
+    `Retry-After, ${GATEWAY_MARKER_HEADER}`
+  );
   headers.append("Vary", "Origin");
   return headers;
 }
@@ -461,7 +467,10 @@ export async function handleRequest(request, env, ctx, options = {}) {
   const runtimeOptions = { ...options, fetchImpl };
 
   if (url.pathname === HEALTH_PATH && request.method === "GET") {
-    const headers = baseHeaders();
+    const headers = addCors(
+      baseHeaders(),
+      allowedRequestOrigin(request, env)
+    );
     headers.set("Content-Type", "application/json; charset=utf-8");
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
   }

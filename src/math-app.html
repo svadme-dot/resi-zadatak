@@ -2487,6 +2487,56 @@ window.MathJax = {
       matematičkim formulama, istorijom razgovora i podrškom za kameru i galeriju.
     </p>
 
+    <button id="openLocalApiSettings" class="settingsAdvancedBtn" type="button">
+      Lokalna API rezerva
+      <span>›</span>
+    </button>
+  </div>
+</div>
+
+<div id="keyOverlay" class="overlay">
+  <div class="card googleApiCard">
+    <div class="googleApiTopbar">
+      <button id="localApiBack" class="googleApiNavBtn" type="button" title="Nazad" aria-label="Nazad">←</button>
+      <h2>API ključevi</h2>
+      <button id="localApiClose" class="googleApiNavBtn googleApiCloseBtn" type="button" title="Zatvori" aria-label="Zatvori">×</button>
+    </div>
+    <p>
+      Cloudflare je primarni i preporučeni put. Ovi ključevi su potpuno opcioni:
+      ako Cloudflare gateway nije dostupan pre početka odgovora, aplikacija može
+      direktno da proba <b>Gemini 3.6 Flash</b> redom 1 → 2 → 3 → 4.
+      Prazan slot se preskače.
+    </p>
+
+    <div class="apiSlots">
+      <label class="apiSlot">
+        <span class="apiSlotHead"><strong>API ključ 1</strong><span>prva lokalna rezerva</span></span>
+        <input id="localKey1" class="field" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="API ključ 1">
+      </label>
+
+      <label class="apiSlot">
+        <span class="apiSlotHead"><strong>API ključ 2</strong><span>rezerva</span></span>
+        <input id="localKey2" class="field" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="API ključ 2">
+      </label>
+
+      <label class="apiSlot">
+        <span class="apiSlotHead"><strong>API ključ 3</strong><span>rezerva</span></span>
+        <input id="localKey3" class="field" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="API ključ 3">
+      </label>
+
+      <label class="apiSlot">
+        <span class="apiSlotHead"><strong>API ključ 4</strong><span>poslednja rezerva</span></span>
+        <input id="localKey4" class="field" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="API ključ 4">
+      </label>
+    </div>
+
+    <button id="saveLocalKeys" class="primary" type="button">Sačuvaj lokalnu rezervu</button>
+    <p class="note">
+      Ključevi ostaju samo u localStorage-u ovog browsera i nisu obavezni.
+      Direktni rezervni poziv može da ih prikaže u browser DevTools-u; koristi
+      ograničene ključeve namenjene samo ovom sajtu. Brisanjem sva četiri polja
+      potpuno isključuješ lokalnu rezervu.
+    </p>
   </div>
 </div>
 
@@ -2508,9 +2558,24 @@ window.MathJax = {
     LOCAL_GATEWAY_OVERRIDE ||
     "https://resi-zadatak-api.REPLACE_WITH_ACCOUNT_SUBDOMAIN.workers.dev/v1/interactions"
   ).trim();
+  const API_GATEWAY_MARKER_HEADER = "X-Math-Gateway";
   const API_SLOT_ORDER = Object.freeze([1, 2, 3, 4]);
 
   const LEGACY_PROVIDER_PREFIX = ["ge", "mi", "ni"].join("");
+  const LOCAL_UPSTREAM_MODEL =
+    [LEGACY_PROVIDER_PREFIX, "-3.6-flash"].join("");
+  const LOCAL_UPSTREAM_API_ROOT = [
+    "https://generative",
+    "language.",
+    "google",
+    "apis.com/v1beta/interactions"
+  ].join("");
+  const LOCAL_UPSTREAM_STREAM_URL =
+    LOCAL_UPSTREAM_API_ROOT + "?alt=sse";
+  const LOCAL_FALLBACK_STORAGE =
+    "matematika_local_api_fallback_v1";
+  const LOCAL_RATE_STORAGE =
+    "matematika_local_api_rate_v1";
   const LEGACY_KEY_STORAGE =
     LEGACY_PROVIDER_PREFIX + "_api_key_persistent_v1";
   const LEGACY_PROFILES_STORAGE =
@@ -2576,11 +2641,16 @@ window.MathJax = {
   const mobileNav = el("mobileNav");
   const mobileNavBackdrop = el("mobileNavBackdrop");
   const settingsOverlay = el("settingsOverlay");
+  const keyOverlay = el("keyOverlay");
+  const localKeyInputs = API_SLOT_ORDER.map(slot =>
+    el(`localKey${slot}`)
+  );
 
   let busy = false;
   let sendPreparing = false;
   let activeSolveController = null;
   let userStopRequested = false;
+  let gatewayResponseReceivedDuringSolve = false;
   let stopButtonHideTimer = null;
   let selectedImage = null;
 
@@ -2607,15 +2677,6 @@ window.MathJax = {
     if (!Number.isFinite(n)) return 1;
     return Math.min(CHAT_ZOOM_MAX, Math.max(CHAT_ZOOM_MIN, n));
   }
-
-  function removeLegacyBrowserSecrets() {
-    try {
-      localStorage.removeItem(LEGACY_KEY_STORAGE);
-      localStorage.removeItem(LEGACY_PROFILES_STORAGE);
-    } catch {}
-  }
-
-  removeLegacyBrowserSecrets();
 
   function loadChatZoom() {
     try {
@@ -3695,6 +3756,111 @@ window.MathJax = {
     settingsOverlay.classList.remove("show");
   }
 
+  function normalizeLocalApiProfile(raw, slot) {
+    return {
+      transport: "local",
+      slot,
+      key: String(
+        typeof raw === "string" ? raw : raw?.key || ""
+      ).trim()
+    };
+  }
+
+  function saveLocalApiProfiles(profiles) {
+    const clean = API_SLOT_ORDER.map(slot =>
+      normalizeLocalApiProfile(profiles?.[slot - 1], slot)
+    );
+
+    localStorage.setItem(
+      LOCAL_FALLBACK_STORAGE,
+      JSON.stringify(clean.map(profile => ({ key: profile.key })))
+    );
+
+    return clean;
+  }
+
+  function loadLocalApiProfiles() {
+    try {
+      const stored = localStorage.getItem(LOCAL_FALLBACK_STORAGE);
+
+      if (stored !== null) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          return API_SLOT_ORDER.map(slot =>
+            normalizeLocalApiProfile(parsed[slot - 1], slot)
+          );
+        }
+        return API_SLOT_ORDER.map(slot =>
+          normalizeLocalApiProfile({}, slot)
+        );
+      }
+
+      let migrated = null;
+      try {
+        const legacyProfiles = JSON.parse(
+          localStorage.getItem(LEGACY_PROFILES_STORAGE) || "null"
+        );
+        if (Array.isArray(legacyProfiles)) {
+          migrated = API_SLOT_ORDER.map(slot =>
+            normalizeLocalApiProfile(legacyProfiles[slot - 1], slot)
+          );
+        }
+      } catch {}
+
+      if (!migrated) {
+        migrated = API_SLOT_ORDER.map(slot =>
+          normalizeLocalApiProfile({}, slot)
+        );
+        const legacyKey = String(
+          localStorage.getItem(LEGACY_KEY_STORAGE) || ""
+        ).trim();
+        if (legacyKey) migrated[0].key = legacyKey;
+      }
+
+      const saved = saveLocalApiProfiles(migrated);
+      localStorage.removeItem(LEGACY_KEY_STORAGE);
+      localStorage.removeItem(LEGACY_PROFILES_STORAGE);
+      return saved;
+    } catch {
+      return API_SLOT_ORDER.map(slot =>
+        normalizeLocalApiProfile({}, slot)
+      );
+    }
+  }
+
+  function getConfiguredLocalApiProfiles() {
+    return loadLocalApiProfiles().filter(profile => profile.key);
+  }
+
+  function populateLocalApiDialog() {
+    const profiles = loadLocalApiProfiles();
+    for (let i = 0; i < localKeyInputs.length; i++) {
+      localKeyInputs[i].value = profiles[i]?.key || "";
+    }
+  }
+
+  function openLocalApiDialog() {
+    if (busy || sendPreparing) {
+      setStatus(
+        "Sačekaj da se trenutni odgovor završi pre promene lokalnih ključeva.",
+        true
+      );
+      return;
+    }
+    closeSettings();
+    populateLocalApiDialog();
+    keyOverlay.classList.add("show");
+  }
+
+  function closeLocalApiDialog() {
+    keyOverlay.classList.remove("show");
+  }
+
+  function backFromLocalApiDialog() {
+    closeLocalApiDialog();
+    openSettings();
+  }
+
   function openMobileNav() {
     mobileNav.classList.add("show");
     mobileNavBackdrop.classList.add("show");
@@ -3718,11 +3884,14 @@ window.MathJax = {
   }
 
   function getApiProfiles() {
-    return API_SLOT_ORDER.map(slot => ({ slot }));
+    return API_SLOT_ORDER.map(slot => ({
+      transport: "gateway",
+      slot
+    }));
   }
 
   function apiProfileId(profile) {
-    return String(profile.slot);
+    return `${profile.transport}:${profile.slot}`;
   }
 
   function setStatus(text = "", error = false) {
@@ -3769,6 +3938,7 @@ window.MathJax = {
     }
 
     userStopRequested = false;
+    gatewayResponseReceivedDuringSolve = false;
     activeSolveController = new AbortController();
     stopGenerationBtn.textContent = "■ Stop";
     stopGenerationBtn.disabled = false;
@@ -5054,6 +5224,11 @@ window.MathJax = {
       liveModel.answer = emptyAnswer;
     }
 
+    // Direktna lokalna rezerva zaobilazi server-side sanitizer, zato pre
+    // trajnog čuvanja neutralizujemo ceo sastavljeni tekst (i split delte).
+    liveModel.answer = sanitizeServiceMessage(liveModel.answer);
+    liveModel.thinking = sanitizeServiceMessage(liveModel.thinking);
+
     renderModelContent(liveModel.answerRendered, liveModel.answer, true);
 
     liveModel.totalMs = performance.now() - liveModel.totalStartedAt;
@@ -5391,6 +5566,28 @@ window.MathJax = {
     return body;
   }
 
+  function buildLocalInteractionRequest(publicBody) {
+    const body = {
+      model: LOCAL_UPSTREAM_MODEL,
+      input: publicBody.input,
+      stream: publicBody.stream,
+      store: true,
+      system_instruction: SYSTEM_INSTRUCTION,
+      tools: [{ type: "code_execution" }],
+      generation_config: {
+        thinking_level: "high",
+        thinking_summaries: "auto"
+      }
+    };
+
+    if (publicBody.previous_interaction_id) {
+      body.previous_interaction_id =
+        publicBody.previous_interaction_id;
+    }
+
+    return body;
+  }
+
   function extractContentText(content) {
     if (!content) return "";
 
@@ -5464,9 +5661,19 @@ window.MathJax = {
       "gi"
     );
 
-    return String(value || "")
+    let clean = String(value || "")
       .replace(providerPattern, "AI servis")
-      .replace(/Google\s+(?:AI servis|API|servis)/gi, "AI servis");
+      .replace(/Google\s+(?:AI servis|API|servis)/gi, "AI servis")
+      .replaceAll(LOCAL_UPSTREAM_STREAM_URL, "AI servis")
+      .replaceAll(LOCAL_UPSTREAM_API_ROOT, "AI servis");
+
+    for (const profile of loadLocalApiProfiles()) {
+      if (profile.key && profile.key.length >= 8) {
+        clean = clean.replaceAll(profile.key, "[API ključ]");
+      }
+    }
+
+    return clean;
   }
 
   function terminalInteractionError(interaction, fallbackStatus = "") {
@@ -5533,6 +5740,8 @@ window.MathJax = {
   function isStalePreviousInteractionError(err) {
     const msg = String(err?.message || "");
     return Boolean(previousInteractionId) &&
+      !err?.gatewayInfrastructureFailure &&
+      !err?.gatewayTransportFailure &&
       !isModelCapabilityFallbackError(err) && (
       err?.status === 404 ||
       /previous.?interaction|requested entity was not found|result not found|not found|expired/i.test(msg)
@@ -5609,46 +5818,317 @@ window.MathJax = {
     }, 100);
   }
 
-  async function fetchInteraction(body, slot, signal) {
-    throwIfUserStopped(signal);
-    const response = await fetch(API_GATEWAY_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "text/event-stream",
-        "X-Math-Api-Slot": String(slot)
-      },
-      body: JSON.stringify(body),
-      signal
-    });
+  function gatewayHealthUrl() {
+    const url = new URL(API_GATEWAY_URL);
+    if (/\/v1\/interactions\/?$/.test(url.pathname)) {
+      url.pathname = url.pathname.replace(
+        /\/v1\/interactions\/?$/,
+        "/health"
+      );
+    } else {
+      url.pathname = "/health";
+    }
+    return url.href;
+  }
 
-    if (!response.ok) {
-      let msg = `HTTP ${response.status}`;
-      let code = "";
-      try {
-        const data = await response.json();
-        code = String(data?.error?.code || data?.code || "");
-        msg = sanitizeServiceMessage(
-          data?.error?.message || data?.message || msg
-        );
-      } catch {}
+  async function gatewayHealthIsAvailable(signal) {
+    if (navigator.onLine === false) return false;
 
-      const err = new Error(msg);
-      err.status = response.status;
-      err.code = code;
+    const controller = new AbortController();
+    let callerAborted = false;
+    const onAbort = () => {
+      callerAborted = true;
+      controller.abort();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const timeout = setTimeout(() => controller.abort(), 4500);
+
+    try {
+      const response = await fetch(gatewayHealthUrl(), {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+        cache: "no-store",
+        signal: controller.signal
+      });
+
+      return Boolean(
+        response.ok &&
+        response.headers.get(API_GATEWAY_MARKER_HEADER) === "1"
+      );
+    } catch {
+      if (callerAborted || signal?.aborted) {
+        throw new UserStopError();
+      }
+      return false;
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
+    }
+  }
+
+  function localApiBucketId(key) {
+    let hash = 2166136261;
+    const value = String(key || "");
+    for (let i = 0; i < value.length; i++) {
+      hash ^= value.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `${(hash >>> 0).toString(16)}:${value.length}`;
+  }
+
+  let localRateMemoryState = {};
+
+  function mergeLocalRateTimestamps(persisted, memory) {
+    const counts = source => {
+      const result = new Map();
+      for (const timestamp of Array.isArray(source) ? source : []) {
+        if (!Number.isFinite(timestamp)) continue;
+        result.set(timestamp, (result.get(timestamp) || 0) + 1);
+      }
+      return result;
+    };
+
+    const persistedCounts = counts(persisted);
+    const memoryCounts = counts(memory);
+    const merged = [];
+    for (const timestamp of new Set([
+      ...persistedCounts.keys(),
+      ...memoryCounts.keys()
+    ])) {
+      const repeats = Math.max(
+        persistedCounts.get(timestamp) || 0,
+        memoryCounts.get(timestamp) || 0
+      );
+      for (let i = 0; i < repeats; i++) merged.push(timestamp);
+    }
+    return merged;
+  }
+
+  function reserveLocalApiAttemptNow(profile) {
+    const now = Date.now();
+    const cutoff = now - 60_000;
+    let state = localRateMemoryState;
+
+    try {
+      const parsed = JSON.parse(
+        localStorage.getItem(LOCAL_RATE_STORAGE) || "{}"
+      );
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const merged = { ...parsed };
+        for (const [bucket, timestamps] of Object.entries(
+          localRateMemoryState
+        )) {
+          merged[bucket] = mergeLocalRateTimestamps(
+            parsed[bucket],
+            timestamps
+          );
+        }
+        state = merged;
+      }
+    } catch {}
+
+    const pruned = {};
+    for (const [bucket, timestamps] of Object.entries(state)) {
+      if (!Array.isArray(timestamps)) continue;
+      const kept = timestamps.filter(timestamp =>
+        Number.isFinite(timestamp) && timestamp >= cutoff
+      ).sort((a, b) => a - b);
+      if (kept.length) pruned[bucket] = kept.slice(-10);
+    }
+
+    const bucket = localApiBucketId(profile.key);
+    const timestamps = pruned[bucket] || [];
+    if (timestamps.length >= 10) {
+      const retryAfterMs = Math.max(
+        1,
+        timestamps[0] + 60_000 - now + 1
+      );
+      const err = new Error(
+        "Ovaj lokalni API ključ je dostigao ograničenje od 10 pokušaja u 60 sekundi."
+      );
+      err.status = 429;
+      err.code = "local_slot_rate_limited";
+      err.retryAfterMs = retryAfterMs;
       throw err;
     }
 
+    timestamps.push(now);
+    pruned[bucket] = timestamps;
+    localRateMemoryState = pruned;
+    try {
+      localStorage.setItem(LOCAL_RATE_STORAGE, JSON.stringify(pruned));
+    } catch {}
+  }
+
+  async function reserveLocalApiAttempt(profile, signal) {
+    throwIfUserStopped(signal);
+    if (navigator.locks?.request) {
+      await navigator.locks.request(
+        "matematika-local-api-rate-v1",
+        { mode: "exclusive", signal },
+        () => reserveLocalApiAttemptNow(profile)
+      );
+      return;
+    }
+    reserveLocalApiAttemptNow(profile);
+  }
+
+  function makeGatewayUnavailableError(message, status = 0) {
+    const err = new Error(message || "Cloudflare gateway nije dostupan.");
+    err.status = Number(status || 0);
+    err.code = "gateway_unavailable";
+    err.gatewayInfrastructureFailure = true;
+    return err;
+  }
+
+  async function fetchGatewayResponse(body, profile, accept, signal) {
+    let response;
+    try {
+      response = await fetch(API_GATEWAY_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": accept,
+          "X-Math-Api-Slot": String(profile.slot)
+        },
+        body: JSON.stringify(body),
+        signal
+      });
+    } catch (err) {
+      if (isUserStopError(err, signal)) throw new UserStopError();
+
+      const gatewayHealthy = await gatewayHealthIsAvailable(signal);
+      if (!gatewayHealthy && navigator.onLine !== false) {
+        throw makeGatewayUnavailableError(
+          "Cloudflare gateway trenutno nije dostupan."
+        );
+      }
+      err.gatewayTransportFailure = true;
+      err.transport = "gateway";
+      throw err;
+    }
+
+    if (response.headers.get(API_GATEWAY_MARKER_HEADER) !== "1") {
+      try { await response.body?.cancel?.(); } catch {}
+      throw makeGatewayUnavailableError(
+        `Cloudflare gateway nije vratio očekivani odgovor (HTTP ${response.status}).`,
+        response.status
+      );
+    }
+
+    if (response.ok) {
+      gatewayResponseReceivedDuringSolve = true;
+    }
+
+    return response;
+  }
+
+  async function fetchTransportResponse(
+    body,
+    profile,
+    accept,
+    signal
+  ) {
+    throwIfUserStopped(signal);
+
+    if (profile.transport === "local") {
+      await reserveLocalApiAttempt(profile, signal);
+      return fetch(
+        body.stream
+          ? LOCAL_UPSTREAM_STREAM_URL
+          : LOCAL_UPSTREAM_API_ROOT,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": accept,
+            "x-goog-api-key": profile.key
+          },
+          body: JSON.stringify(buildLocalInteractionRequest(body)),
+          signal
+        }
+      );
+    }
+
+    return fetchGatewayResponse(body, profile, accept, signal);
+  }
+
+  async function throwIfInteractionHttpError(response, profile) {
+    if (response.ok) return;
+
+    let msg = `HTTP ${response.status}`;
+    let code = "";
+    try {
+      const data = await response.json();
+      code = String(data?.error?.code || data?.code || "");
+      msg = sanitizeServiceMessage(
+        data?.error?.message || data?.message || msg
+      );
+    } catch {}
+
+    const err = new Error(msg);
+    err.status = response.status;
+    err.code = code;
+    err.transport = profile.transport;
+    err.gatewayResponseReceived = profile.transport === "gateway";
+    if (
+      profile.transport === "gateway" &&
+      ![
+        "not_found",
+        "slot_unavailable",
+        "slot_rate_limited",
+        "rate_control_unavailable",
+        "origin_not_allowed",
+        "preflight_not_allowed",
+        "method_not_allowed",
+        "unsupported_media_type",
+        "invalid_slot",
+        "forbidden_header",
+        "invalid_request",
+        "invalid_json",
+        "invalid_input",
+        "invalid_image",
+        "text_too_large",
+        "image_too_large",
+        "request_too_large"
+      ].includes(code)
+    ) {
+      gatewayResponseReceivedDuringSolve = true;
+    }
+    if (
+      profile.transport === "gateway" &&
+      ["not_found", "rate_control_unavailable"].includes(code)
+    ) {
+      err.gatewayInfrastructureFailure = true;
+    }
+    throw err;
+  }
+
+  async function fetchInteraction(body, profile, signal) {
+    const response = await fetchTransportResponse(
+      body,
+      profile,
+      "text/event-stream",
+      signal
+    );
+
+    await throwIfInteractionHttpError(response, profile);
+
     if (!response.body) {
-      throw new Error("Browser nije dobio streaming response body.");
+      const err = new Error(
+        "Browser nije dobio streaming response body."
+      );
+      err.gatewayResponseReceived = profile.transport === "gateway";
+      err.gatewayTransportFailure = profile.transport === "gateway";
+      throw err;
     }
 
     return response;
   }
 
   // Robustan SSE reader: ne zavisi od toga gde browser iseče mrežni chunk.
-  async function streamInteraction(body, slot, signal) {
-    const response = await fetchInteraction(body, slot, signal);
+  async function streamInteraction(body, profile, signal) {
+    const response = await fetchInteraction(body, profile, signal);
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
 
@@ -5692,6 +6172,27 @@ window.MathJax = {
           )
         );
         err.code = event?.error?.code || "";
+        const numericStatus = Number(err.code);
+        if (Number.isFinite(numericStatus) && numericStatus > 0) {
+          err.status = numericStatus;
+        }
+        const streamStatus = String(
+          event?.error?.status || event?.status || ""
+        ).toUpperCase();
+        if (
+          profile.transport === "gateway" &&
+          (
+            (numericStatus === 502 && streamStatus === "UNAVAILABLE") ||
+            (
+              numericStatus === 504 &&
+              streamStatus === "DEADLINE_EXCEEDED"
+            )
+          )
+        ) {
+          err.gatewayResponseReceived = true;
+          err.gatewayTransportFailure = true;
+          err.transport = "gateway";
+        }
         throw err;
       }
 
@@ -5843,7 +6344,17 @@ window.MathJax = {
     };
 
     while (true) {
-      const { value, done } = await reader.read();
+      let value;
+      let done;
+      try {
+        ({ value, done } = await reader.read());
+      } catch (err) {
+        if (profile.transport === "gateway") {
+          err.gatewayTransportFailure = true;
+          err.transport = "gateway";
+        }
+        throw err;
+      }
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
@@ -5879,7 +6390,7 @@ window.MathJax = {
   async function requestInteractionOnce(
     text,
     img,
-    slot,
+    profile,
     profileId,
     signal,
     excludeTrailingUser = false
@@ -5900,34 +6411,19 @@ window.MathJax = {
 
     body.stream = false;
 
-    const response = await fetch(API_GATEWAY_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "X-Math-Api-Slot": String(slot)
-      },
-      body: JSON.stringify(body),
+    const response = await fetchTransportResponse(
+      body,
+      profile,
+      "application/json",
       signal
-    });
+    );
+
+    await throwIfInteractionHttpError(response, profile);
 
     let data = null;
     try {
       data = await response.json();
     } catch {}
-
-    if (!response.ok) {
-      const msg =
-        sanitizeServiceMessage(
-          data?.error?.message ||
-          data?.message ||
-          `HTTP ${response.status}`
-        );
-
-      const err = new Error(msg);
-      err.status = response.status;
-      throw err;
-    }
 
     if (!data || typeof data !== "object") {
       throw new Error("AI servis je vratio prazan odgovor.");
@@ -5947,7 +6443,7 @@ window.MathJax = {
   async function requestInteractionOnceWithRetry(
     text,
     img,
-    slot,
+    profile,
     profileId,
     signal,
     excludeTrailingUser = false
@@ -5960,7 +6456,7 @@ window.MathJax = {
         return await requestInteractionOnce(
           text,
           img,
-          slot,
+          profile,
           profileId,
           signal,
           excludeTrailingUser
@@ -5985,6 +6481,9 @@ window.MathJax = {
         if (
           attempt === 0 &&
           isRetriableDemandError(err) &&
+          !err?.gatewayInfrastructureFailure &&
+          !err?.gatewayTransportFailure &&
+          String(err?.code || "") !== "local_slot_rate_limited" &&
           !isModelCapabilityFallbackError(err)
         ) {
           await sleep(1200, signal);
@@ -6001,7 +6500,7 @@ window.MathJax = {
   async function runInteractionWithRecovery(
     text,
     img,
-    slot,
+    profile,
     profileId,
     signal,
     excludeTrailingUser = false
@@ -6022,7 +6521,7 @@ window.MathJax = {
             excludeTrailingUser
           );
 
-        return await streamInteraction(body, slot, signal);
+        return await streamInteraction(body, profile, signal);
       } catch (err) {
         if (isUserStopError(err, signal)) {
           throw new UserStopError();
@@ -6049,7 +6548,13 @@ window.MathJax = {
         if (
           attempt < 2 &&
           isRetriableDemandError(err) &&
-          !["slot_rate_limited", "slot_unavailable"].includes(
+          !err?.gatewayInfrastructureFailure &&
+          !err?.gatewayTransportFailure &&
+          ![
+            "slot_rate_limited",
+            "slot_unavailable",
+            "local_slot_rate_limited"
+          ].includes(
             String(err?.code || "")
           ) &&
           !isModelCapabilityFallbackError(err) &&
@@ -6380,159 +6885,214 @@ window.MathJax = {
     let solved = false;
 
     try {
-      for (let index = 0; index < profiles.length; index++) {
-        const profile = profiles[index];
-        const profileId = apiProfileId(profile);
+      let phase = "gateway";
+      let phaseProfiles = profiles;
+      let gatewayInfrastructureFailure = false;
+      const gatewayFailureErrors = [];
 
-        if (index > 0) {
-          resetLiveModelForRetry(
-            `Prelazim na rezervni API pokušaj ${profile.slot}…`
+      while (!solved) {
+        for (let index = 0; index < phaseProfiles.length; index++) {
+          const profile = phaseProfiles[index];
+          const profileId = apiProfileId(profile);
+          const isLocal = profile.transport === "local";
+
+          if (index > 0) {
+            resetLiveModelForRetry(
+              `Prelazim na rezervni API pokušaj ${profile.slot}…`
+            );
+          }
+
+          setStatus(
+            isLocal
+              ? `Lokalna rezerva · API ${profile.slot}…`
+              : `AI servis · pokušaj ${profile.slot}…`
           );
-        }
 
-        setStatus(
-          `AI servis · pokušaj ${profile.slot}…`
-        );
-
-        try {
-          let result =
-            await runInteractionWithRecovery(
-              requestText,
-              requestImage,
-              profile.slot,
-              profileId,
-              solveSignal,
-              true
-            );
-
-          // Završni status failed/cancelled je autoritativan: ne šalji novi
-          // sync zahtev istom profilu, već klasifikuj razlog i eventualno
-          // pređi na sledeći pokušaj samo ako ništa nije prikazano.
-          throwIfTerminalInteractionFailed(result);
-
-          // Ako browser proguta završni SSE event ili model_output,
-          // pokušaj isti slot jednom i kao običan JSON odgovor.
-          if (
-            !result.completed ||
-            result.completedStatus !== "completed" ||
-            !result.answerText
-          ) {
-            if (hasVisibleLiveOutput()) {
-              throw new Error(
-                "Veza sa streamom je prekinuta nakon što je deo odgovora već prikazan."
-              );
-            }
-
-            setStatus(
-              `AI servis · dovršavam odgovor…`
-            );
-
-            result =
-              await requestInteractionOnceWithRetry(
+          try {
+            let result =
+              await runInteractionWithRecovery(
                 requestText,
                 requestImage,
-                profile.slot,
+                profile,
                 profileId,
                 solveSignal,
                 true
               );
 
+            // Završni status failed/cancelled je autoritativan: ne šalji novi
+            // sync zahtev istom profilu, već klasifikuj razlog i eventualno
+            // pređi na sledeći pokušaj samo ako ništa nije prikazano.
             throwIfTerminalInteractionFailed(result);
-          }
 
-          if (
-            !result.completed ||
-            result.completedStatus !== "completed"
-          ) {
-            throw new Error(
-              `Odgovor nije kompletan (${result.completedStatus || "nepoznat status"}).`
+            // Ako browser proguta završni SSE event ili model_output,
+            // pokušaj isti profil jednom i kao običan JSON odgovor.
+            if (
+              !result.completed ||
+              result.completedStatus !== "completed" ||
+              !result.answerText
+            ) {
+              if (hasVisibleLiveOutput()) {
+                throw new Error(
+                  "Veza sa streamom je prekinuta nakon što je deo odgovora već prikazan."
+                );
+              }
+
+              setStatus("AI servis · dovršavam odgovor…");
+
+              result =
+                await requestInteractionOnceWithRetry(
+                  requestText,
+                  requestImage,
+                  profile,
+                  profileId,
+                  solveSignal,
+                  true
+                );
+
+              throwIfTerminalInteractionFailed(result);
+            }
+
+            if (
+              !result.completed ||
+              result.completedStatus !== "completed"
+            ) {
+              throw new Error(
+                `Odgovor nije kompletan (${result.completedStatus || "nepoznat status"}).`
+              );
+            }
+
+            if (!result.answerText) {
+              throw new Error(
+                "Model je završio zahtev, ali nije vratio model_output tekst."
+              );
+            }
+
+            replaceLiveAnswer(result.answerText);
+
+            if (result.thoughtText) {
+              liveModel.thinking = result.thoughtText;
+              renderModelContent(
+                liveModel.thinkingRendered,
+                result.thoughtText,
+                true
+              );
+            }
+
+            if (result.interactionId) {
+              saveCurrentInteractionId(
+                result.interactionId,
+                profileId
+              );
+            } else {
+              // Bez server-side interaction id-a nastavljamo iz lokalne istorije.
+              previousInteractionId = "";
+              previousInteractionProfileId = "";
+            }
+
+            solved = true;
+            solveOutcome = "completed";
+
+            const solvedChatId = activeChatId;
+            finishLiveModel();
+
+            // Naslov se izvodi lokalno, bez skrivenog dodatnog AI zahteva.
+            maybeGenerateChatTitle(solvedChatId);
+
+            if (isLocal) {
+              setStatus(
+                `Rešeno lokalnom rezervom · API ${profile.slot}`
+              );
+            } else if (index === 0) {
+              setStatus("");
+            } else {
+              setStatus(
+                `Rešeno preko rezervnog API pokušaja ${profile.slot}`
+              );
+            }
+
+            if (isLocal || index > 0) {
+              setTimeout(() => {
+                if (!busy) setStatus("");
+              }, 1800);
+            }
+
+            break;
+          } catch (err) {
+            if (isUserStopError(err, solveSignal)) {
+              throw new UserStopError();
+            }
+
+            const msg = sanitizeServiceMessage(
+              err?.message || String(err)
             );
-          }
+            const label = isLocal ? "Lokalni API" : "API pokušaj";
 
-          if (!result.answerText) {
-            throw new Error(
-              "Model je završio zahtev, ali nije vratio model_output tekst."
+            failures.push(`${label} ${profile.slot}: ${msg}`);
+            console.warn(
+              `[${label} ${profile.slot} neuspeh]`,
+              msg
             );
-          }
 
-          replaceLiveAnswer(result.answerText);
+            if (!isLocal) {
+              if (err?.gatewayTransportFailure) {
+                throw err;
+              }
+              gatewayFailureErrors.push(err);
+              if (
+                err?.gatewayInfrastructureFailure &&
+                !hasVisibleLiveOutput()
+              ) {
+                gatewayInfrastructureFailure = true;
+                break;
+              }
+            }
 
-          if (result.thoughtText) {
-            liveModel.thinking = result.thoughtText;
-            renderModelContent(
-              liveModel.thinkingRendered,
-              result.thoughtText,
-              true
-            );
-          }
+            const canUseNextProfile = canUseNextApiProfile(err);
+            if (!canUseNextProfile) throw err;
 
-          if (result.interactionId) {
-            saveCurrentInteractionId(
-              result.interactionId,
-              profileId
-            );
-          } else {
-            // Bez server-side interaction id-a nastavljamo iz lokalne istorije.
-            previousInteractionId = "";
-            previousInteractionProfileId = "";
-          }
-
-          solved = true;
-          solveOutcome = "completed";
-
-          const solvedChatId = activeChatId;
-
-          finishLiveModel();
-
-          // Naslov se izvodi lokalno, bez skrivenog dodatnog AI zahteva.
-          maybeGenerateChatTitle(solvedChatId);
-
-          if (index === 0) {
-            setStatus("");
-          } else {
-            setStatus(
-              `Rešeno preko rezervnog API pokušaja ${profile.slot}`
-            );
-            setTimeout(() => {
-              if (!busy) setStatus("");
-            }, 1800);
-          }
-
-          break;
-        } catch (err) {
-          if (isUserStopError(err, solveSignal)) {
-            throw new UserStopError();
-          }
-
-          const msg = sanitizeServiceMessage(
-            err?.message || String(err)
-          );
-
-          failures.push(
-            `API pokušaj ${profile.slot}: ${msg}`
-          );
-
-          console.warn(
-            `[AI API ${profile.slot} neuspeh]`,
-            msg
-          );
-
-          const canUseNextProfile =
-            canUseNextApiProfile(err);
-
-          if (!canUseNextProfile) {
-            throw err;
-          }
-
-          if (index < profiles.length - 1) {
-            const next = profiles[index + 1];
-            const reason = profileFallbackReason(err);
-            setStatus(
-              `API pokušaj ${profile.slot}: ${reason} — prelazim na pokušaj ${next.slot}…`
-            );
-            await sleep(650, solveSignal);
+            if (index < phaseProfiles.length - 1) {
+              const next = phaseProfiles[index + 1];
+              const reason = profileFallbackReason(err);
+              setStatus(
+                `${label} ${profile.slot}: ${reason} — prelazim na API ${next.slot}…`
+              );
+              await sleep(650, solveSignal);
+            }
           }
         }
+
+        if (solved) break;
+
+        if (phase === "gateway" && !hasVisibleLiveOutput()) {
+          const allGatewaySlotsUnavailable =
+            gatewayFailureErrors.length === phaseProfiles.length &&
+            gatewayFailureErrors.every(err =>
+              String(err?.code || "") === "slot_unavailable"
+            );
+
+          if (
+            !gatewayResponseReceivedDuringSolve &&
+            (
+              gatewayInfrastructureFailure ||
+              allGatewaySlotsUnavailable
+            )
+          ) {
+            const localProfiles = getConfiguredLocalApiProfiles();
+            if (localProfiles.length) {
+              resetLiveModelForRetry(
+                "Cloudflare nije dostupan — prelazim na lokalnu rezervu…"
+              );
+              setStatus(
+                "Cloudflare nije dostupan — koristim lokalnu rezervu…"
+              );
+              phase = "local";
+              phaseProfiles = localProfiles;
+              continue;
+            }
+          }
+        }
+
+        break;
       }
 
       if (!solved) {
@@ -6611,6 +7171,70 @@ window.MathJax = {
       );
       scrollBottom(true);
     }
+  }
+
+  el("saveLocalKeys").addEventListener("click", () => {
+    if (busy || sendPreparing) {
+      setStatus(
+        "Sačekaj da se trenutni odgovor završi pre promene lokalnih ključeva.",
+        true
+      );
+      return;
+    }
+    try {
+      const previous = loadLocalApiProfiles();
+      const profiles = API_SLOT_ORDER.map((slot, index) => ({
+        transport: "local",
+        slot,
+        key: localKeyInputs[index].value.trim()
+      }));
+      const changed = profiles.some(
+        (profile, index) =>
+          profile.key !== String(previous[index]?.key || "")
+      );
+      const saved = saveLocalApiProfiles(profiles);
+      const configured = saved.filter(profile => profile.key).length;
+
+      if (changed) {
+        if (previousInteractionProfileId.startsWith("local:")) {
+          saveCurrentInteractionId("", "");
+        }
+        for (const chat of chats) {
+          if (String(chat.interactionProfileId || "").startsWith("local:")) {
+            chat.interactionId = "";
+            chat.interactionProfileId = "";
+          }
+        }
+        persistChats();
+      }
+
+      closeLocalApiDialog();
+      openSettings();
+      setStatus(
+        configured
+          ? `Sačuvano lokalnih API ključeva: ${configured}.`
+          : "Lokalna API rezerva je isključena."
+      );
+      setTimeout(() => {
+        if (!busy) setStatus("");
+      }, 1800);
+    } catch {
+      setStatus(
+        "Browser nije mogao lokalno da sačuva API ključeve.",
+        true
+      );
+    }
+  });
+
+  for (const input of localKeyInputs) {
+    input.addEventListener("keydown", event => {
+      if (
+        event.key === "Enter" &&
+        (event.ctrlKey || event.metaKey)
+      ) {
+        el("saveLocalKeys").click();
+      }
+    });
   }
 
   el("keyBtn").addEventListener("click", openSettings);
@@ -6699,6 +7323,21 @@ window.MathJax = {
   });
 
   el("settingsClose").addEventListener("click", closeSettings);
+  el("openLocalApiSettings").addEventListener(
+    "click",
+    openLocalApiDialog
+  );
+  el("localApiBack").addEventListener(
+    "click",
+    backFromLocalApiDialog
+  );
+  el("localApiClose").addEventListener(
+    "click",
+    closeLocalApiDialog
+  );
+  keyOverlay.addEventListener("click", event => {
+    if (event.target === keyOverlay) closeLocalApiDialog();
+  });
 
   el("themeDarkBtn").addEventListener("click", () => {
     applyTheme("dark", true);
@@ -7024,6 +7663,11 @@ window.MathJax = {
 
     if (imageViewer.classList.contains("show")) {
       closeImageViewer();
+      return;
+    }
+
+    if (keyOverlay.classList.contains("show")) {
+      closeLocalApiDialog();
       return;
     }
 

@@ -9,6 +9,8 @@ import {
   reserveInState
 } from "../src/limiter.js";
 
+const GATEWAY_MARKER_HEADER = "X-Math-Gateway";
+
 test("rolling limiter allows 10 calls and rejects the 11th", () => {
   let state = createEmptyLimiterState();
 
@@ -124,6 +126,10 @@ test("concurrent Durable Object reservations use one transaction each and allow 
   );
   const decisions = await Promise.all(responses.map(response => response.json()));
 
+  assert.equal(
+    responses.every(response => response.headers.get(GATEWAY_MARKER_HEADER) === "1"),
+    true
+  );
   assert.equal(decisions.filter(item => item.allowed).length, RATE_LIMIT);
   assert.equal(decisions.filter(item => !item.allowed).length, 40);
   assert.equal(context.transactionCount, 50);

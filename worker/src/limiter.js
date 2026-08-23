@@ -1,7 +1,16 @@
+import {
+  GATEWAY_MARKER_HEADER,
+  GATEWAY_MARKER_VALUE
+} from "./config.js";
+
 export const RATE_LIMIT = 10;
 export const RATE_WINDOW_MS = 60_000;
 
 const SLOT_NAMES = ["1", "2", "3", "4"];
+const COORDINATOR_RESPONSE_HEADERS = {
+  "Cache-Control": "no-store",
+  [GATEWAY_MARKER_HEADER]: GATEWAY_MARKER_VALUE
+};
 
 export function createEmptyLimiterState() {
   return {
@@ -81,7 +90,8 @@ export class RateCoordinator {
     const url = new URL(request.url);
     if (request.method !== "POST" || url.pathname !== "/reserve") {
       return new Response(null, {
-        status: request.method === "POST" ? 404 : 405
+        status: request.method === "POST" ? 404 : 405,
+        headers: COORDINATOR_RESPONSE_HEADERS
       });
     }
 
@@ -91,7 +101,7 @@ export class RateCoordinator {
     } catch {
       return Response.json(
         { error: "invalid_request" },
-        { status: 400, headers: { "Cache-Control": "no-store" } }
+        { status: 400, headers: COORDINATOR_RESPONSE_HEADERS }
       );
     }
 
@@ -99,7 +109,7 @@ export class RateCoordinator {
     if (!SLOT_NAMES.includes(slot) || Object.keys(body || {}).length !== 1) {
       return Response.json(
         { error: "invalid_slot" },
-        { status: 400, headers: { "Cache-Control": "no-store" } }
+        { status: 400, headers: COORDINATOR_RESPONSE_HEADERS }
       );
     }
 
@@ -135,7 +145,7 @@ export class RateCoordinator {
         allowed: decision.allowed,
         retryAfterMs: decision.retryAfterMs
       },
-      { headers: { "Cache-Control": "no-store" } }
+      { headers: COORDINATOR_RESPONSE_HEADERS }
     );
   }
 }

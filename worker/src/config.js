@@ -21,6 +21,8 @@ export const SYSTEM_INSTRUCTION =
 
 export const PUBLIC_PATH = "/v1/interactions";
 export const HEALTH_PATH = "/health";
+export const GATEWAY_MARKER_HEADER = "X-Math-Gateway";
+export const GATEWAY_MARKER_VALUE = "1";
 
 export const MAX_REQUEST_BYTES = 3 * 1024 * 1024;
 export const MAX_TEXT_BYTES = 128 * 1024;

@@ -24,6 +24,18 @@ const EXPECTED_FOUR_PROFILE_ORDER = [
 ];
 const EXPECTED_THOUGHT_HIGH_DEMAND_ORDER =
   EXPECTED_FOUR_PROFILE_ORDER.map(tuple => [...tuple]);
+const LOCAL_API_KEYS = [1, 2, 3, 4].map(
+  slot => 'e2e-local-api-' + slot
+);
+const LOCAL_FALLBACK_SCENARIOS = new Set([
+  'gateway-success-local-unused',
+  'gateway-marked-upstream-no-local',
+  'gateway-sse-transport-error-no-fallback',
+  'gateway-rate-control-local',
+  'gateway-unmarked-deployment-local',
+  'gateway-fetch-health-fail-local',
+  'local-key-fallback-order'
+]);
 const VALID_SCENARIOS = new Set([
   'success',
   'slow',
@@ -35,7 +47,9 @@ const VALID_SCENARIOS = new Set([
   'thought-high-demand-four',
   'answer-high-demand-no-fallback',
   'payload-error-no-fallback',
-  'retry-after-reload'
+  'retry-after-reload',
+  ...LOCAL_FALLBACK_SCENARIOS,
+  'gateway-down-no-local-keys'
 ]);
 const RETRY_PROMPT =
   'E2E ponovni pokušaj: reši jednačinu 2x + 3 = 11.';
@@ -163,36 +177,73 @@ function evaluateSolverRequest(record) {
   const body = record.body || {};
   const image = findImagePart(body);
   const forbidden = findForbiddenSearchConfig(body);
+  const isGateway = record.transport === 'gateway';
+  const isLocal = record.transport === 'local';
+  const requiresProviderConfig = !isGateway;
+  const localAllowedFields = new Set([
+    'model',
+    'input',
+    'stream',
+    'store',
+    'system_instruction',
+    'tools',
+    'generation_config',
+    'previous_interaction_id'
+  ]);
   const checks = {
     model:
-      body.model === MODEL,
+      !requiresProviderConfig || body.model === MODEL,
     thinkingLevel:
+      !requiresProviderConfig ||
       body.generation_config?.thinking_level === 'high',
     thinkingSummaries:
+      !requiresProviderConfig ||
       body.generation_config?.thinking_summaries === 'auto',
     toolsExactlyCodeExecution:
-      Array.isArray(body.tools) &&
-      body.tools.length === 1 &&
-      Object.keys(body.tools[0] || {}).length === 1 &&
-      body.tools[0]?.type === 'code_execution',
+      !requiresProviderConfig || (
+        Array.isArray(body.tools) &&
+        body.tools.length === 1 &&
+        Object.keys(body.tools[0] || {}).length === 1 &&
+        body.tools[0]?.type === 'code_execution'
+      ),
     noGoogleSearchOrGrounding:
       forbidden.length === 0,
     imagePayload:
-      image?.mime_type?.startsWith('image/') === true &&
-      isBase64(image?.data),
+      !image || (
+        image?.mime_type?.startsWith('image/') === true &&
+        isBase64(image?.data)
+      ),
     imageResolutionHigh:
-      image?.resolution === 'high',
+      !image || image?.resolution === 'high',
     browserSentNoApiKey:
-      record.browserContract?.sentNoApiKey !== false,
+      !isGateway || record.browserContract?.sentNoApiKey === true,
     browserSentNoModelOrProviderConfig:
-      record.browserContract?.sentNoModelOrProviderConfig !== false,
+      !isGateway ||
+      record.browserContract?.sentNoModelOrProviderConfig === true,
     browserUsedAllowedGatewayShape:
-      record.browserContract?.usedAllowedGatewayShape !== false
+      !isGateway ||
+      record.browserContract?.usedAllowedGatewayShape === true,
+    localSentExpectedFakeKey:
+      !isLocal || LOCAL_API_KEYS.includes(record.apiKey),
+    localDidNotSendGatewaySlot:
+      !isLocal || record.request?.gatewaySlotHeaderPresent === false,
+    localUsedDirectCredentialHeader:
+      !isLocal || record.request?.apiKeyHeaderPresent === true,
+    localUsedExactFixedBody:
+      !isLocal || (
+        body.model === MODEL &&
+        body.store === true &&
+        typeof body.system_instruction === 'string' &&
+        body.system_instruction.startsWith('Odgovaraj jasno, prirodno') &&
+        body.system_instruction.length > 1000 &&
+        Object.keys(body).every(key => localAllowedFields.has(key))
+      )
   };
 
   return {
     requestId: record.id,
     scenario: record.scenario,
+    transport: record.transport || 'legacy-direct',
     apiKey: record.apiKey,
     checks,
     ok: Object.values(checks).every(Boolean),
@@ -216,7 +267,14 @@ function evaluateRequests(requestLog, options = {}) {
     (!scenario || record.scenario === scenario) &&
     (!run || record.run === run)
   );
-  const solverRecords = relevant;
+  const solverRecords = relevant.filter(record => record.kind === 'solve');
+  const healthRecords = relevant.filter(record => record.kind === 'health');
+  const gatewayRecords = solverRecords.filter(
+    record => record.transport === 'gateway'
+  );
+  const localRecords = solverRecords.filter(
+    record => record.transport === 'local'
+  );
   const clientEvidence = (options.clientEvidenceLog || []).filter(record =>
     (!scenario || record.scenario === scenario) &&
     (!run || record.run === run)
@@ -228,6 +286,121 @@ function evaluateRequests(requestLog, options = {}) {
     scenarioChecks.completedStream = solverRecords.some(
       record => record.response?.outcome === 'completed'
     );
+  }
+
+  if (scenario === 'gateway-success-local-unused') {
+    scenarioChecks.gatewayCompleted =
+      gatewayRecords.length === 1 &&
+      gatewayRecords[0]?.response?.outcome === 'completed';
+    scenarioChecks.gatewayWasMarked =
+      gatewayRecords[0]?.request?.gatewayMarkerSent === true;
+    scenarioChecks.configuredLocalWasNeverCalled = localRecords.length === 0;
+  }
+
+  if (scenario === 'gateway-marked-upstream-no-local') {
+    scenarioChecks.markedUpstreamFailureWasReturned =
+      gatewayRecords.length === 1 &&
+      gatewayRecords[0]?.request?.gatewayMarkerSent === true &&
+      gatewayRecords[0]?.response?.status === 400 &&
+      gatewayRecords[0]?.response?.code === 'upstream_request_rejected';
+    scenarioChecks.normalUpstreamFailureNeverCalledLocal =
+      localRecords.length === 0;
+  }
+
+  if (scenario === 'gateway-sse-transport-error-no-fallback') {
+    const first = gatewayRecords[0];
+    scenarioChecks.receivedMarkedGatewaySseTransportError =
+      first?.request?.gatewayMarkerSent === true &&
+      first?.response?.status === 200 &&
+      first?.response?.outcome === 'gateway-sse-transport-error' &&
+      first?.response?.code === 502 &&
+      first?.response?.streamStatus === 'UNAVAILABLE';
+    scenarioChecks.exactlyOneGatewayPost = gatewayRecords.length === 1;
+    scenarioChecks.zeroSyncRecovery =
+      !solverRecords.some(record => record.body?.stream === false);
+    scenarioChecks.zeroOtherGatewaySlot =
+      gatewayRecords.every(record => record.apiKey === 'e2e-api-1');
+    scenarioChecks.zeroLocalFallback = localRecords.length === 0;
+  }
+
+  if (scenario === 'gateway-rate-control-local') {
+    scenarioChecks.rateControlFailureWasMarked =
+      gatewayRecords.length === 1 &&
+      gatewayRecords[0]?.request?.gatewayMarkerSent === true &&
+      gatewayRecords[0]?.response?.code === 'rate_control_unavailable';
+    scenarioChecks.transitionedToFirstLocalKey =
+      localRecords.length === 1 &&
+      localRecords[0]?.apiKey === LOCAL_API_KEYS[0] &&
+      localRecords[0]?.response?.outcome === 'completed';
+    scenarioChecks.gatewayPrecededLocal =
+      gatewayRecords[0]?.id < localRecords[0]?.id;
+  }
+
+  if (scenario === 'gateway-unmarked-deployment-local') {
+    scenarioChecks.deploymentErrorWasUnmarked =
+      gatewayRecords.length === 1 &&
+      gatewayRecords[0]?.request?.gatewayMarkerSent === false &&
+      gatewayRecords[0]?.response?.outcome === 'unmarked-deployment-error';
+    scenarioChecks.unmarkedResponseTransitionedLocal =
+      localRecords.length === 1 &&
+      localRecords[0]?.apiKey === LOCAL_API_KEYS[0] &&
+      localRecords[0]?.response?.outcome === 'completed';
+  }
+
+  if (scenario === 'gateway-fetch-health-fail-local') {
+    scenarioChecks.initialGatewayPostNeverReachedServer =
+      gatewayRecords.length === 0;
+    scenarioChecks.failedHealthProbeWasObserved =
+      healthRecords.length === 1 &&
+      healthRecords[0]?.response?.status === 503 &&
+      healthRecords[0]?.request?.gatewayMarkerSent === false;
+    scenarioChecks.failedHealthTransitionedLocal =
+      localRecords.length === 1 &&
+      localRecords[0]?.apiKey === LOCAL_API_KEYS[0] &&
+      localRecords[0]?.response?.outcome === 'completed';
+    scenarioChecks.healthProbePrecededLocal =
+      healthRecords[0]?.id < localRecords[0]?.id;
+  }
+
+  if (scenario === 'local-key-fallback-order') {
+    const localOrder = localRecords.map(record => [
+      record.apiKey,
+      String(record.body?.model || '')
+    ]);
+    scenarioChecks.gatewayFailurePrecededLocalKeys =
+      gatewayRecords.length === 1 &&
+      gatewayRecords[0]?.response?.code === 'rate_control_unavailable' &&
+      gatewayRecords[0]?.id < localRecords[0]?.id;
+    scenarioChecks.localKeyOneFailedThenKeyTwoCompleted =
+      JSON.stringify(localOrder) === JSON.stringify([
+        [LOCAL_API_KEYS[0], MODEL],
+        [LOCAL_API_KEYS[1], MODEL]
+      ]) &&
+      localRecords[0]?.response?.status === 401 &&
+      localRecords[0]?.response?.outcome === 'local-key-eligible-failure' &&
+      localRecords[1]?.response?.outcome === 'completed';
+    scenarioChecks.localBodiesAndHeadersMatchExactly =
+      localRecords.length === 2 &&
+      localRecords.every(record =>
+        record.request?.apiKeyHeaderPresent === true &&
+        record.request?.gatewaySlotHeaderPresent === false &&
+        record.body?.model === MODEL &&
+        record.body?.store === true &&
+        record.body?.generation_config?.thinking_level === 'high' &&
+        record.body?.generation_config?.thinking_summaries === 'auto' &&
+        JSON.stringify(record.body?.tools) ===
+          JSON.stringify([{ type: 'code_execution' }])
+      ) &&
+      localRecords[0]?.body?.system_instruction ===
+        localRecords[1]?.body?.system_instruction;
+  }
+
+  if (scenario === 'gateway-down-no-local-keys') {
+    scenarioChecks.gatewayInfrastructureFailureWasReturned =
+      gatewayRecords.length === 1 &&
+      gatewayRecords[0]?.response?.code === 'rate_control_unavailable';
+    scenarioChecks.zeroLocalKeysMadeNoDirectRequest =
+      localRecords.length === 0;
   }
 
   if (scenario === 'fallback-429') {
@@ -450,6 +623,9 @@ function evaluateRequests(requestLog, options = {}) {
     counts: {
       allMatchingRequests: relevant.length,
       solverRequests: solverRecords.length,
+      gatewayRequests: gatewayRecords.length,
+      localRequests: localRecords.length,
+      healthRequests: healthRecords.length,
       clientEvidence: clientEvidence.length,
       solverRequestsWithImage: solverRecords.filter(record =>
         Boolean(findImagePart(record.body))
@@ -825,6 +1001,36 @@ function sendSingleLineSseError(res, record, message, outcome) {
   res.end('data: ' + JSON.stringify(event) + '\n');
 }
 
+function sendGatewayTransportSseError(res, record) {
+  const message =
+    'The marked gateway stream became unavailable before any output.';
+  const event = {
+    event_type: 'error',
+    error: {
+      code: 502,
+      status: 'UNAVAILABLE',
+      message
+    }
+  };
+
+  record.response = {
+    status: 200,
+    outcome: 'gateway-sse-transport-error',
+    code: 502,
+    streamStatus: 'UNAVAILABLE',
+    eventsSent: 1,
+    closedEarly: false,
+    singleLine: true,
+    message
+  };
+
+  res.writeHead(200, {
+    'Cache-Control': 'no-cache, no-store',
+    'Content-Type': 'text/event-stream; charset=utf-8'
+  });
+  res.end('data: ' + JSON.stringify(event) + '\n');
+}
+
 function sendTerminalFailedCompletion(res, record) {
   const event = {
     event_type: 'interaction.completed',
@@ -961,7 +1167,10 @@ function harnessBootstrap() {
     '<script id="math-e2e-bootstrap">',
     '(function () {',
     '  var params = new URLSearchParams(location.search);',
-    '  var allowed = ["success", "slow", "fallback-429", "fallback-four", "partial-no-continue", "sse-error-next-profile", "terminal-failed-next-profile", "thought-high-demand-four", "answer-high-demand-no-fallback", "payload-error-no-fallback", "retry-after-reload"];',
+    '  var allowed = ' + JSON.stringify([...VALID_SCENARIOS]) + ';',
+    '  var localFallbackScenarios = ' +
+      JSON.stringify([...LOCAL_FALLBACK_SCENARIOS]) + ';',
+    '  var localKeys = ' + JSON.stringify(LOCAL_API_KEYS) + ';',
     '  var scenario = params.get("scenario") || "success";',
     '  if (allowed.indexOf(scenario) === -1) scenario = "success";',
     '  var runId = params.get("run") || scenario;',
@@ -970,17 +1179,41 @@ function harnessBootstrap() {
     '    localStorage.clear();',
     '    sessionStorage.setItem(freshKey, "1");',
     '  }',
+    '  if (localFallbackScenarios.indexOf(scenario) !== -1) {',
+    '    localStorage.setItem("matematika_local_api_fallback_v1", JSON.stringify(localKeys.map(function (key) { return { key: key }; })));',
+    '  } else if (scenario === "gateway-down-no-local-keys") {',
+    '    localStorage.setItem("matematika_local_api_fallback_v1", JSON.stringify([{ key: "" }, { key: "" }, { key: "" }, { key: "" }]));',
+    '  }',
     '  var realFetch = window.fetch.bind(window);',
+    '  function parsedUrl(raw) {',
+    '    try { return new URL(raw, location.href); } catch (error) { return null; }',
+    '  }',
+    '  function isLocalUpstream(raw) {',
+    '    var url = parsedUrl(raw);',
+    '    var host = ["generative", "language.", "google", "apis.com"].join("");',
+    '    return !!url && url.hostname === host && url.pathname === "/v1beta/interactions";',
+    '  }',
     '  window.fetch = function (input, init) {',
     '    var raw = typeof input === "string"',
     '      ? input',
     '      : input && input.url ? input.url : String(input || "");',
     '    if (raw.indexOf("/__mock/gateway/v1/interactions") !== -1) {',
+    '      if (scenario === "gateway-fetch-health-fail-local") {',
+    '        return Promise.reject(new TypeError("Deterministic gateway fetch failure."));',
+    '      }',
     '      if (scenario === "retry-after-reload" && window.__MATH_E2E_RETRY__?.onGeminiRequest) {',
     '        try { window.__MATH_E2E_RETRY__.onGeminiRequest(); } catch (error) {',
     '          console.error("[Math E2E retry request hook]", error);',
     '        }',
     '      }',
+    '    }',
+    '    if (isLocalUpstream(raw)) {',
+    '      var upstream = parsedUrl(raw);',
+    '      var rewritten = new URL("/__mock/local/v1beta/interactions", location.origin);',
+    '      rewritten.search = upstream.search;',
+    '      rewritten.searchParams.set("scenario", scenario);',
+    '      rewritten.searchParams.set("run", runId);',
+    '      return realFetch(rewritten.href, init);',
     '    }',
     '    return realFetch(input, init);',
     '  };',
@@ -1056,6 +1289,14 @@ function dashboardHtml(host, port) {
     '<li><a href="' + base + '/docs/?scenario=thought-high-demand-four&fresh=1">Thinking-only high demand reaches API 4</a></li>',
     '<li><a href="' + base + '/docs/?scenario=answer-high-demand-no-fallback&fresh=1">Answer then high demand must not continue</a></li>',
     '<li><a href="' + base + '/docs/?scenario=payload-error-no-fallback&fresh=1">Unsupported image payload must stop</a></li>',
+    '<li><a href="' + base + '/docs/source.html?scenario=gateway-success-local-unused&fresh=1">Gateway success never uses configured local keys</a></li>',
+    '<li><a href="' + base + '/docs/source.html?scenario=gateway-marked-upstream-no-local&fresh=1">Marked upstream rejection never uses local keys</a></li>',
+    '<li><a href="' + base + '/docs/source.html?scenario=gateway-sse-transport-error-no-fallback&fresh=1">Marked gateway SSE transport error stops all fallback</a></li>',
+    '<li><a href="' + base + '/docs/source.html?scenario=gateway-rate-control-local&fresh=1">Rate coordinator failure uses local fallback</a></li>',
+    '<li><a href="' + base + '/docs/source.html?scenario=gateway-unmarked-deployment-local&fresh=1">Unmarked deployment error uses local fallback</a></li>',
+    '<li><a href="' + base + '/docs/source.html?scenario=gateway-fetch-health-fail-local&fresh=1">Fetch plus health failure uses local fallback</a></li>',
+    '<li><a href="' + base + '/docs/source.html?scenario=local-key-fallback-order&fresh=1">Local key 1 fails, local key 2 succeeds</a></li>',
+    '<li><a href="' + base + '/docs/source.html?scenario=gateway-down-no-local-keys&fresh=1">Gateway down with zero local keys</a></li>',
     '<li><a href="' + base + '/docs/?scenario=retry-after-reload&fresh=1&run=' + retryRun + '">Reload then empty-Send retry (automatic)</a></li>',
     '</ul></div>',
     '<div class="card"><h2>Evidence</h2><ul>',
@@ -1070,6 +1311,14 @@ function dashboardHtml(host, port) {
     '<li><a href="/__harness__/assertions?scenario=thought-high-demand-four">Thinking-only high-demand assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=answer-high-demand-no-fallback">Answer/high-demand guard assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=payload-error-no-fallback">Payload classifier assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=gateway-success-local-unused">Gateway-primary assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=gateway-marked-upstream-no-local">Marked-upstream assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=gateway-sse-transport-error-no-fallback">Gateway SSE transport-error assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=gateway-rate-control-local">Rate-control local assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=gateway-unmarked-deployment-local">Unmarked-deployment assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=gateway-fetch-health-fail-local">Gateway health-failure assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=local-key-fallback-order">Local ordered-key assertions</a></li>',
+    '<li><a href="/__harness__/assertions?scenario=gateway-down-no-local-keys">Zero-local-key assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=slow&expectStop=1">Stop/abort assertions</a></li>',
     '<li><a href="/__harness__/assertions?scenario=retry-after-reload&run=' + retryRun + '">Reload/retry assertions</a></li>',
     '<li><a href="/__harness__/reset">Reset recorded evidence</a></li>',
@@ -1223,18 +1472,70 @@ export function createHarnessServer() {
         return;
       }
 
+      if (url.pathname === '/__mock/gateway/health') {
+        const scenario = scenarioFrom(url);
+        const run = url.searchParams.get('run') || '';
+        const healthFails =
+          scenario === 'gateway-fetch-health-fail-local';
+        const markerSent = !healthFails;
+        if (markerSent) res.setHeader('X-Math-Gateway', '1');
+
+        const record = {
+          id: nextRequestId++,
+          receivedAt: new Date().toISOString(),
+          run,
+          scenario,
+          kind: 'health',
+          transport: 'gateway',
+          request: {
+            method: req.method,
+            path: url.pathname,
+            gatewayMarkerSent: markerSent
+          },
+          response: healthFails
+            ? { status: 503, outcome: 'health-unavailable' }
+            : { status: 200, outcome: 'healthy' }
+        };
+        requestLog.push(record);
+
+        if (req.method !== 'GET') {
+          record.response = { status: 405, outcome: 'health-method-rejected' };
+          sendJson(res, 405, { error: { message: 'GET required.' } });
+          return;
+        }
+
+        if (healthFails) {
+          sendJson(res, 503, {
+            error: {
+              code: 'gateway_health_unavailable',
+              message: 'Deterministic failed gateway health probe.'
+            }
+          });
+          return;
+        }
+
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
       if (
         url.pathname === '/__mock/gemini/v1beta/interactions' ||
-        url.pathname === '/__mock/gateway/v1/interactions'
+        url.pathname === '/__mock/gateway/v1/interactions' ||
+        url.pathname === '/__mock/local/v1beta/interactions'
       ) {
+        const isGateway = url.pathname === '/__mock/gateway/v1/interactions';
+        const isLocal = url.pathname === '/__mock/local/v1beta/interactions';
+        const scenario = scenarioFrom(url);
+        const gatewayMarkerSent =
+          isGateway && scenario !== 'gateway-unmarked-deployment-local';
+        if (gatewayMarkerSent) res.setHeader('X-Math-Gateway', '1');
+
         if (req.method !== 'POST') {
           sendJson(res, 405, { error: { message: 'POST required.' } });
           return;
         }
 
         const incomingBody = await readJsonBody(req);
-        const isGateway = url.pathname === '/__mock/gateway/v1/interactions';
-        const scenario = scenarioFrom(url);
         const slot = String(req.headers['x-math-api-slot'] || '');
         const apiKey = isGateway
           ? 'e2e-api-' + slot
@@ -1259,7 +1560,19 @@ export function createHarnessServer() {
                   browserAllowedFields.has(key)
                 )
             }
-          : null;
+          : isLocal
+            ? {
+                sentExpectedLocalApiKey:
+                  LOCAL_API_KEYS.includes(apiKey),
+                sentNoGatewaySlot:
+                  !Object.hasOwn(req.headers, 'x-math-api-slot'),
+                sentFixedLocalConfig:
+                  incomingBody?.model === MODEL &&
+                  incomingBody?.store === true &&
+                  incomingBody?.generation_config?.thinking_level === 'high' &&
+                  incomingBody?.generation_config?.thinking_summaries === 'auto'
+              }
+            : null;
         const body = isGateway
           ? {
               ...incomingBody,
@@ -1275,6 +1588,7 @@ export function createHarnessServer() {
           : incomingBody;
         const run = url.searchParams.get('run') || '';
         const scenarioRequestIndex = requestLog.filter(record =>
+          record.kind === 'solve' &&
           record.scenario === scenario &&
           record.run === run
         ).length + 1;
@@ -1285,6 +1599,11 @@ export function createHarnessServer() {
           scenario,
           scenarioRequestIndex,
           kind: 'solve',
+          transport: isGateway
+            ? 'gateway'
+            : isLocal
+              ? 'local'
+              : 'legacy-direct',
           apiKey,
           browserContract,
           request: {
@@ -1292,12 +1611,176 @@ export function createHarnessServer() {
             path: url.pathname,
             alt: url.searchParams.get('alt') || '',
             accept: String(req.headers.accept || ''),
-            contentType: String(req.headers['content-type'] || '')
+            contentType: String(req.headers['content-type'] || ''),
+            apiKeyHeaderPresent:
+              Object.hasOwn(req.headers, 'x-goog-api-key'),
+            gatewaySlotHeaderPresent:
+              Object.hasOwn(req.headers, 'x-math-api-slot'),
+            gatewayMarkerSent
           },
           body,
           response: null
         };
         requestLog.push(record);
+
+        if (scenario === 'gateway-sse-transport-error-no-fallback') {
+          const isExpectedFirstGatewayPost =
+            isGateway &&
+            scenarioRequestIndex === 1 &&
+            slot === '1' &&
+            incomingBody?.stream === true;
+
+          if (isExpectedFirstGatewayPost) {
+            sendGatewayTransportSseError(res, record);
+            return;
+          }
+
+          record.response = {
+            status: 409,
+            code: 'unexpected_transport_continuation',
+            outcome: 'unexpected-transport-continuation',
+            eventsSent: 0,
+            closedEarly: false
+          };
+          sendJson(res, 409, {
+            error: {
+              code: 'unexpected_transport_continuation',
+              status: 409,
+              message:
+                'Gateway SSE transport failure must not trigger sync, another gateway slot, or local fallback.'
+            }
+          });
+          return;
+        }
+
+        if (
+          isGateway &&
+          scenario === 'gateway-marked-upstream-no-local'
+        ) {
+          record.response = {
+            status: 400,
+            code: 'upstream_request_rejected',
+            outcome: 'marked-normal-upstream-failure',
+            eventsSent: 0,
+            closedEarly: false
+          };
+          sendJson(res, 400, {
+            error: {
+              code: 'upstream_request_rejected',
+              status: 400,
+              message: 'The AI service rejected this deterministic request.'
+            }
+          });
+          return;
+        }
+
+        if (
+          isGateway &&
+          [
+            'gateway-rate-control-local',
+            'local-key-fallback-order',
+            'gateway-down-no-local-keys'
+          ].includes(scenario)
+        ) {
+          record.response = {
+            status: 503,
+            code: 'rate_control_unavailable',
+            outcome: 'gateway-rate-control-unavailable',
+            eventsSent: 0,
+            closedEarly: false
+          };
+          sendJson(res, 503, {
+            error: {
+              code: 'rate_control_unavailable',
+              status: 503,
+              message: 'Request rate control is temporarily unavailable.'
+            }
+          });
+          return;
+        }
+
+        if (
+          isGateway &&
+          scenario === 'gateway-unmarked-deployment-local'
+        ) {
+          record.response = {
+            status: 530,
+            code: '',
+            outcome: 'unmarked-deployment-error',
+            eventsSent: 0,
+            closedEarly: false
+          };
+          sendText(
+            res,
+            530,
+            'Deterministic unmarked deployment failure.'
+          );
+          return;
+        }
+
+        if (isLocal && scenario === 'local-key-fallback-order') {
+          if (apiKey === LOCAL_API_KEYS[0]) {
+            record.response = {
+              status: 401,
+              code: 'UNAUTHENTICATED',
+              outcome: 'local-key-eligible-failure',
+              eventsSent: 0,
+              closedEarly: false
+            };
+            sendJson(res, 401, {
+              error: {
+                code: 'UNAUTHENTICATED',
+                status: 401,
+                message: 'Deterministic local API key 1 was rejected.'
+              }
+            });
+            return;
+          }
+
+          if (apiKey !== LOCAL_API_KEYS[1]) {
+            record.response = {
+              status: 409,
+              code: 'unexpected_local_key',
+              outcome: 'unexpected-local-key-order',
+              eventsSent: 0,
+              closedEarly: false
+            };
+            sendJson(res, 409, {
+              error: {
+                code: 'unexpected_local_key',
+                status: 409,
+                message: 'Expected local API key 2 after local API key 1.'
+              }
+            });
+            return;
+          }
+        }
+
+        if (
+          isLocal &&
+          [
+            'gateway-rate-control-local',
+            'gateway-unmarked-deployment-local',
+            'gateway-fetch-health-fail-local'
+          ].includes(scenario) &&
+          apiKey !== LOCAL_API_KEYS[0]
+        ) {
+          record.response = {
+            status: 409,
+            code: 'unexpected_local_key',
+            outcome: 'unexpected-local-key-order',
+            eventsSent: 0,
+            closedEarly: false
+          };
+          sendJson(res, 409, {
+            error: {
+              code: 'unexpected_local_key',
+              status: 409,
+              message: 'Expected the first configured local API key.'
+            }
+          });
+          return;
+        }
 
         if (
           scenario === 'retry-after-reload' &&
@@ -1599,6 +2082,18 @@ export function createHarnessServer() {
         return;
       }
 
+      if (url.pathname === '/docs/source.html') {
+        await serveFile(
+          res,
+          path.join(WORKSPACE, 'src', 'math-app.html'),
+          {
+            transform: buffer =>
+              Buffer.from(injectHarness(buffer.toString('utf8')), 'utf8')
+          }
+        );
+        return;
+      }
+
       if (url.pathname === '/__harness__/retry-after-reload-driver.js') {
         await serveFile(
           res,
@@ -1706,6 +2201,14 @@ if (isMain) {
         'Demand:    http://' + host + ':' + actualPort + '/docs/?scenario=thought-high-demand-four&fresh=1',
         'Answer:    http://' + host + ':' + actualPort + '/docs/?scenario=answer-high-demand-no-fallback&fresh=1',
         'Payload:   http://' + host + ':' + actualPort + '/docs/?scenario=payload-error-no-fallback&fresh=1',
+        'GW primary:http://' + host + ':' + actualPort + '/docs/source.html?scenario=gateway-success-local-unused&fresh=1',
+        'GW marked: http://' + host + ':' + actualPort + '/docs/source.html?scenario=gateway-marked-upstream-no-local&fresh=1',
+        'GW SSE err:http://' + host + ':' + actualPort + '/docs/source.html?scenario=gateway-sse-transport-error-no-fallback&fresh=1',
+        'GW rate:   http://' + host + ':' + actualPort + '/docs/source.html?scenario=gateway-rate-control-local&fresh=1',
+        'GW unmark: http://' + host + ':' + actualPort + '/docs/source.html?scenario=gateway-unmarked-deployment-local&fresh=1',
+        'GW health: http://' + host + ':' + actualPort + '/docs/source.html?scenario=gateway-fetch-health-fail-local&fresh=1',
+        'Local keys:http://' + host + ':' + actualPort + '/docs/source.html?scenario=local-key-fallback-order&fresh=1',
+        'No locals: http://' + host + ':' + actualPort + '/docs/source.html?scenario=gateway-down-no-local-keys&fresh=1',
         'Retry:     http://' + host + ':' + actualPort + '/docs/?scenario=retry-after-reload&fresh=1&run=retry-' + Date.now(),
         'Fixture:   ' + path.join(FIXTURES_DIR, 'linear-equation.png'),
         ''

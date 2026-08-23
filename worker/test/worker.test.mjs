@@ -17,6 +17,12 @@ import {
   validPublicBody
 } from "./helpers.mjs";
 
+const GATEWAY_MARKER_HEADER = "X-Math-Gateway";
+
+function assertHealthyGateway(response) {
+  assert.equal(response.headers.get(GATEWAY_MARKER_HEADER), "1");
+}
+
 test("health is neutral and fixed routes and methods are enforced", async () => {
   const env = makeEnv();
   const health = await handleRequest(
@@ -25,7 +31,26 @@ test("health is neutral and fixed routes and methods are enforced", async () => 
     {}
   );
   assert.equal(health.status, 200);
+  assertHealthyGateway(health);
   assert.deepEqual(await health.json(), { ok: true });
+
+  const browserHealth = await handleRequest(
+    new Request("https://worker.example/health", {
+      headers: { Origin: ALLOWED_ORIGIN }
+    }),
+    env,
+    {}
+  );
+  assert.equal(browserHealth.status, 200);
+  assertHealthyGateway(browserHealth);
+  assert.equal(
+    browserHealth.headers.get("Access-Control-Allow-Origin"),
+    ALLOWED_ORIGIN
+  );
+  assert.match(
+    browserHealth.headers.get("Access-Control-Expose-Headers"),
+    /(?:^|,\s*)X-Math-Gateway(?:\s*,|$)/i
+  );
 
   const missing = await handleRequest(
     makeRequest({ path: "/anything" }),
@@ -33,6 +58,7 @@ test("health is neutral and fixed routes and methods are enforced", async () => 
     {}
   );
   assert.equal(missing.status, 404);
+  assertHealthyGateway(missing);
 
   const method = await handleRequest(
     makeRequest({ method: "PUT", body: "{}" }),
@@ -40,6 +66,7 @@ test("health is neutral and fixed routes and methods are enforced", async () => 
     {}
   );
   assert.equal(method.status, 405);
+  assertHealthyGateway(method);
   assert.equal(method.headers.get("Allow"), "POST, OPTIONS");
 });
 
@@ -58,10 +85,15 @@ test("allowed preflight returns narrow CORS policy without credentials or wildca
   const response = await handleRequest(request, makeEnv(), {});
 
   assert.equal(response.status, 204);
+  assertHealthyGateway(response);
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), ALLOWED_ORIGIN);
   assert.equal(response.headers.get("Access-Control-Allow-Methods"), "POST, OPTIONS");
   assert.equal(response.headers.get("Access-Control-Allow-Headers"), "Content-Type, X-Math-Api-Slot");
   assert.equal(response.headers.get("Access-Control-Allow-Credentials"), null);
+  assert.match(
+    response.headers.get("Access-Control-Expose-Headers"),
+    /(?:^|,\s*)X-Math-Gateway(?:\s*,|$)/i
+  );
   assert.notEqual(response.headers.get("Access-Control-Allow-Origin"), "*");
   assert.match(response.headers.get("Vary"), /Origin/);
 });
@@ -80,6 +112,7 @@ test("CORS fails closed for missing, lookalike, insecure, and unconfigured origi
       { fetchImpl: async () => syncSuccess() }
     );
     assert.equal(response.status, 403, String(origin));
+    assertHealthyGateway(response);
     assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
   }
 
@@ -90,6 +123,7 @@ test("CORS fails closed for missing, lookalike, insecure, and unconfigured origi
     { fetchImpl: async () => syncSuccess() }
   );
   assert.equal(unconfigured.status, 403);
+  assertHealthyGateway(unconfigured);
 });
 
 test("preflight rejects credential headers and a non-POST method", async () => {
@@ -112,6 +146,7 @@ test("preflight rejects credential headers and a non-POST method", async () => {
       {}
     );
     assert.equal(response.status, 403);
+    assertHealthyGateway(response);
   }
 });
 
@@ -138,6 +173,11 @@ test("gateway injects the exact fixed model policy and sends only the selected s
   );
 
   assert.equal(response.status, 200);
+  assertHealthyGateway(response);
+  assert.match(
+    response.headers.get("Access-Control-Expose-Headers"),
+    /(?:^|,\s*)X-Math-Gateway(?:\s*,|$)/i
+  );
   assert.equal(calls.length, 1);
   const call = calls[0];
   assert.equal(call.url, UPSTREAM_INTERACTIONS_URL);
@@ -500,6 +540,7 @@ test("streaming stays incremental and sanitizes branding in metadata and answer 
 
   const response = await responsePromise;
   assert.equal(response.status, 200);
+  assertHealthyGateway(response);
   assert.equal(response.headers.get("Content-Type"), "text/event-stream; charset=utf-8");
   const reader = response.body.getReader();
   const first = await reader.read();

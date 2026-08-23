@@ -381,6 +381,63 @@ test('single-line SSE modality error advances to the next ordered tuple', async 
   });
 });
 
+test('marked gateway 200 SSE transport error stops without sync, another slot, or local fallback', async () => {
+  await withServer(async (base, harness) => {
+    const scenario = 'gateway-sse-transport-error-no-fallback';
+    const run = 'gateway-sse-502-unavailable';
+    const response = await fetch(
+      base +
+        '/__mock/gateway/v1/interactions?alt=sse' +
+        '&scenario=' + scenario + '&run=' + run,
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'text/event-stream',
+          'Content-Type': 'application/json',
+          'X-Math-Api-Slot': '1'
+        },
+        body: JSON.stringify({
+          input: validSolverBody.input,
+          stream: true
+        })
+      }
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('x-math-gateway'), '1');
+    const wire = await response.text();
+    const dataLines = wire
+      .split(/\r?\n/)
+      .filter(line => line.startsWith('data: '));
+    assert.equal(dataLines.length, 1);
+    const event = JSON.parse(dataLines[0].slice(6));
+    assert.equal(event.event_type, 'error');
+    assert.equal(event.error.code, 502);
+    assert.equal(event.error.status, 'UNAVAILABLE');
+
+    const assertions = await fetch(
+      base + '/__harness__/assertions?scenario=' + scenario + '&run=' + run
+    ).then(item => item.json());
+    assert.equal(assertions.ok, true);
+    assert.deepEqual(assertions.scenarioChecks, {
+      receivedMarkedGatewaySseTransportError: true,
+      exactlyOneGatewayPost: true,
+      zeroSyncRecovery: true,
+      zeroOtherGatewaySlot: true,
+      zeroLocalFallback: true
+    });
+    assert.equal(assertions.counts.solverRequests, 1);
+    assert.equal(assertions.counts.gatewayRequests, 1);
+    assert.equal(assertions.counts.localRequests, 0);
+    assert.equal(
+      harness.requestLog.some(record =>
+        record.run === run && record.body?.stream === false
+      ),
+      false
+    );
+  });
+});
+
 test('failed interaction completion advances without a sync duplicate', async () => {
   await withServer(async (base, harness) => {
     const run = 'terminal-failed-modality';
@@ -816,5 +873,167 @@ test('reload retry oracle rejects changed prompt, image, or API 2', async () => 
     assert.equal(assertions.scenarioChecks.retryPromptIsExact, false);
     assert.equal(assertions.scenarioChecks.retryImageIsByteExact, false);
     assert.equal(assertions.scenarioChecks.noUnexpectedApi2, false);
+  });
+});
+
+test('browser local limiter admits ten fixed-clock calls and blocks the eleventh before upstream', async () => {
+  await withServer(async (base, harness) => {
+    const scenario = 'gateway-rate-control-local';
+    const run = 'fixed-clock-local-limit';
+    const fakeKey = 'e2e-local-api-1';
+    const fixedNow = 1_787_496_000_000;
+    const values = new Map([
+      [
+        'matematika_local_api_fallback_v1',
+        JSON.stringify([
+          { key: fakeKey },
+          { key: fakeKey },
+          { key: '' },
+          { key: '' }
+        ])
+      ]
+    ]);
+    const localStorage = {
+      getItem(key) {
+        return values.has(key) ? values.get(key) : null;
+      },
+      setItem(key, value) {
+        values.set(key, String(value));
+      },
+      removeItem(key) {
+        values.delete(key);
+      }
+    };
+    const lockNames = [];
+    const navigator = {
+      locks: {
+        async request(name, _options, callback) {
+          lockNames.push(name);
+          return callback();
+        }
+      }
+    };
+    const FrozenDate = { now: () => fixedNow };
+
+    // Execute the exact limiter implementation shipped in the frontend.
+    // Date.now is frozen before this small runtime is initialized.
+    const source = await readFile(
+      new URL('../../src/math-app.html', import.meta.url),
+      'utf8'
+    );
+    const limiterStart = source.indexOf('  function localApiBucketId(key) {');
+    const limiterEnd = source.indexOf(
+      '  function makeGatewayUnavailableError',
+      limiterStart
+    );
+    assert.ok(limiterStart >= 0 && limiterEnd > limiterStart);
+    const limiterSource = source.slice(limiterStart, limiterEnd);
+    const createLimiterRuntime = new Function(
+      'localStorage',
+      'navigator',
+      'Date',
+      [
+        'const LOCAL_RATE_STORAGE = "matematika_local_api_rate_v1";',
+        'function throwIfUserStopped() {}',
+        limiterSource,
+        'return { localApiBucketId, reserveLocalApiAttempt };'
+      ].join('\n')
+    );
+    const limiter = createLimiterRuntime(
+      localStorage,
+      navigator,
+      FrozenDate
+    );
+
+    const gatewayResponse = await fetch(
+      base +
+        '/__mock/gateway/v1/interactions?scenario=' + scenario +
+        '&run=' + run,
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'X-Math-Api-Slot': '1'
+        },
+        body: JSON.stringify({
+          input: validSolverBody.input,
+          stream: false
+        })
+      }
+    );
+    assert.equal(gatewayResponse.status, 503);
+    assert.equal(gatewayResponse.headers.get('x-math-gateway'), '1');
+    assert.equal(
+      (await gatewayResponse.json()).error.code,
+      'rate_control_unavailable'
+    );
+
+    const localBody = {
+      ...validSolverBody,
+      stream: false,
+      system_instruction:
+        'Odgovaraj jasno, prirodno' + ' i pregledno'.repeat(120)
+    };
+    const profiles = [
+      { transport: 'local', slot: 1, key: fakeKey },
+      { transport: 'local', slot: 2, key: fakeKey }
+    ];
+
+    for (let index = 0; index < 10; index++) {
+      const profile = profiles[index % profiles.length];
+      await limiter.reserveLocalApiAttempt(profile);
+
+      const response = await fetch(
+        base +
+          '/__mock/local/v1beta/interactions?scenario=' + scenario +
+          '&run=' + run,
+        {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'x-goog-api-key': profile.key
+          },
+          body: JSON.stringify(localBody)
+        }
+      );
+      assert.equal(response.status, 200);
+      await response.json();
+    }
+
+    await assert.rejects(
+      limiter.reserveLocalApiAttempt(profiles[1]),
+      error =>
+        error?.status === 429 &&
+        error?.code === 'local_slot_rate_limited' &&
+        error?.retryAfterMs === 60_001
+    );
+
+    const localCalls = harness.requestLog.filter(record =>
+      record.scenario === scenario &&
+      record.run === run &&
+      record.transport === 'local'
+    );
+    assert.equal(localCalls.length, 10);
+    assert.equal(
+      localCalls.every(record => record.apiKey === fakeKey),
+      true
+    );
+
+    const bucket = limiter.localApiBucketId(fakeKey);
+    const persisted = JSON.parse(
+      values.get('matematika_local_api_rate_v1') || '{}'
+    );
+    assert.deepEqual(
+      persisted[bucket],
+      Array.from({ length: 10 }, () => fixedNow)
+    );
+    assert.equal(Object.keys(persisted).length, 1);
+    assert.equal(lockNames.length, 11);
+    assert.equal(
+      lockNames.every(name => name === 'matematika-local-api-rate-v1'),
+      true
+    );
   });
 });
