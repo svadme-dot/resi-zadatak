@@ -2,14 +2,15 @@
 
 ## Status
 
-Backend je lokalno pripremljen, ali još nije objavljen. Produkcijski Worker,
-secrets i GitHub Pages izmena ne smeju biti objavljeni bez eksplicitne dozvole
-vlasnika projekta.
+Produkcijski Worker i četiri secrets objavljeni su 23.08.2026. nakon eksplicitne
+dozvole vlasnika. GitHub Pages build koristi stvarni Worker endpoint i prošao je
+završne statičke, E2E i produkcijske provere pre objavljivanja.
 
 - Frontend: `https://svadme-dot.github.io/resi-zadatak/`
 - Worker name: `resi-zadatak-api`
-- Planirani endpoint:
-  `https://resi-zadatak-api.<account-subdomain>.workers.dev/v1/interactions`
+- Produkcijski endpoint:
+  `https://resi-zadatak-api.vasilije-demonjic.workers.dev/v1/interactions`
+- Proverena Worker verzija: `4d2a6340-c078-4936-a07e-0746ecb1cfbe`
 - Lokalni restore tag: `backup-before-secure-api-backend`
 - Restore tag pre opcione lokalne rezerve:
   `backup-before-local-api-fallback`
@@ -57,8 +58,9 @@ Dozvoljeni nazivi Worker secrets su:
 - `GEMINI_API_KEY_3`
 - `GEMINI_API_KEY_4`
 
-Vrednosti se ne čuvaju u repozitorijumu. Nakon odobrenja produkcijskih izmena,
-svaki secret se unosi interaktivno iz direktorijuma `worker`:
+Vrednosti se ne čuvaju u repozitorijumu. Sva četiri imena su potvrđena kao
+aktivni Cloudflare `secret_text` bindings; vrednosti nisu prikazane. Za kasniju
+zamenu secret se unosi interaktivno iz direktorijuma `worker`:
 
 ```powershell
 npx wrangler secret put GEMINI_API_KEY_1
@@ -72,7 +74,7 @@ argument, URL, GitHub Actions log ili dokumentaciju.
 
 ## Deploy procedura
 
-Ove komande su pripremljene, ali se ne izvršavaju bez eksplicitnog odobrenja:
+Produkcijski deploy je urađen ovim postupkom nakon eksplicitnog odobrenja:
 
 ```powershell
 cd worker
@@ -81,10 +83,22 @@ npm test
 npx wrangler deploy
 ```
 
-Posle prvog Worker deploy-a treba uneti četiri secrets, proveriti `/health` i
-mock/ograničeni produkcijski tok, upisati stvarni Worker URL u jedinu frontend
-konstantu `API_GATEWAY_URL`, ponovo pokrenuti build i testove, pa tek onda
-objaviti GitHub Pages izmenu.
+Posle deploy-a su postavljena četiri secrets, provereni `/health`, CORS i
+pre-upstream negativni zahtevi, a stvarni Worker URL je upisan u jedinu frontend
+konstantu `API_GATEWAY_URL`. Isti build/test postupak treba ponoviti pre svakog
+budućeg GitHub Pages objavljivanja.
+
+Završna produkcijska provera je izvršila po jedan mali stvarni streaming zahtev
+sa tekstom i sa JPEG slikom. Oba su vratila HTTP 200, gateway marker,
+`interaction.completed` i `model_output`; ni javni odgovor ni headeri nisu
+sadržali naziv provajdera ili vrednost bilo kog od četiri ključa.
+
+Tokom prvog produkcijskog testa otkrivene su dve Cloudflare runtime nijanse koje
+Node test ne reprodukuje: ugrađeni `fetch` ne sme se pozvati sa tuđim `this`
+receiverom, a trenutni workerd odbija `redirect: "error"`. Poziv je zato
+izdvojen iz objekta, a redirect politika je `manual`. Svaki 3xx se eksplicitno
+prekida i pretvara u neutralni 502, pa se tajni header nikada automatski ne
+prosleđuje odredištu redirecta. Regresioni testovi pokrivaju oba slučaja.
 
 ## Free plan i limit poziva
 
@@ -93,8 +107,8 @@ Workers Free planu i da nema koraka koji traži karticu, Payment Method, Upgrade
 Paid ili Subscription.
 
 Ta provera je završena 23.08.2026: aktivan je `Workers Free`, `$0`, bez payment
-method-a, billing adrese i plaćene Workers pretplate. Produkcijski deploy i dalje
-čeka zasebnu eksplicitnu dozvolu vlasnika.
+method-a, billing adrese i plaćene Workers pretplate. Deploy nije otvorio niti
+aktivirao Payment, Upgrade ili Paid korak.
 
 Trenutno dokumentovani relevantni Free limiti su:
 
@@ -115,12 +129,14 @@ ispod navedenih Free dnevnih kvota. Zlonamerni odbijeni zahtevi i dalje mogu
 potrošiti dnevnu Worker/DO kvotu i privremeno učiniti javnu aplikaciju
 nedostupnom.
 
-Važan test pre produkcije: Free plan ima samo 10 ms CPU po Worker pozivu.
+Free plan ima samo 10 ms CPU po Worker pozivu.
 Worker zato prima najviše 3 MiB JSON-a i 2 MiB JPEG-a, a frontend normalnu sliku
 prvo zadržava na postojećih 1800 px / quality 0,9 i samo ako je prevelika
 adaptivno je svodi na najviše 1,5 MiB. I pored te rezerve, payload blizu gornje
-granice mora biti izmeren kroz remote preview pre objave; veliki base64 JSON može
-preći CPU limit i dobiti Cloudflare 1102.
+granice je proveravan na produkcijskom Free Worker-u zahtevom od 2.097.351 B koji
+je prošao čitanje, JSON parse i image validaciju, a zatim očekivano odbijen pre
+Durable Object/upstream faze; nije dobijen Cloudflare 1102. Ovo je praktična
+provera trenutne putanje, ne garancija za svaki budući payload ili runtime.
 
 ### Ograničenje lokalne rezerve
 
@@ -181,6 +197,11 @@ DevTools ne može sakriti podatke direktnog browser zahteva.
 
 Originalno stanje je sačuvano tagom `backup-before-secure-api-backend` na
 commitu `6419629923ebbafe58d23e819fbbb0fe1070a9ed`.
+
+Isto originalno stanje postoji i kao nezavisan ZIP, bez `api_keys.txt`:
+`D:\Vasilije\AI\math\RESI-ZADATAK_BACKUP_before_secure_api_backend_2026-08-23.zip`.
+ZIP ima 38 stavki, 154.768 B i SHA-256
+`696B6B5B42C2CFD99AC674DF0ED5C0CA4EA8894C4EFC7068DDFA84F085F5DB5C`.
 
 Stanje sa bezbednim Worker backendom, ali pre opcione lokalne rezerve, sačuvano
 je tagom `backup-before-local-api-fallback` na commitu

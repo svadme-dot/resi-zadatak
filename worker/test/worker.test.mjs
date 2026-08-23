@@ -183,7 +183,7 @@ test("gateway injects the exact fixed model policy and sends only the selected s
   assert.equal(call.url, UPSTREAM_INTERACTIONS_URL);
   assert.equal(call.init.headers["x-goog-api-key"], "canary-secret-slot-2");
   assert.equal(call.init.headers.Accept, "application/json");
-  assert.equal(call.init.redirect, "error");
+  assert.equal(call.init.redirect, "manual");
   assert.equal(call.body.model, UPSTREAM_MODEL);
   assert.strictEqual(call.body.model, "gemini-3.6-flash");
   assert.deepEqual(call.body.input, input);
@@ -198,6 +198,25 @@ test("gateway injects the exact fixed model policy and sends only the selected s
   assert.doesNotMatch(call.init.body, /canary-secret-slot/);
   assert.doesNotMatch(response.headers.toString(), /canary-secret-slot/i);
   assert.doesNotMatch(await response.text(), /canary-secret-slot/i);
+});
+
+test("outbound fetch is invoked without an options-object receiver", async () => {
+  let receiver = "not-called";
+  async function strictFetch() {
+    receiver = this;
+    return syncSuccess("Receiver-safe response.");
+  }
+
+  const response = await handleRequest(
+    makeRequest({ body: validPublicBody({ stream: false }) }),
+    makeEnv(),
+    {},
+    { fetchImpl: strictFetch }
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(receiver, undefined);
+  assertHealthyGateway(response);
 });
 
 test("browser model/key/config injection and credential headers are rejected before reservation", async () => {
@@ -342,6 +361,7 @@ test("limiter failure is fail-closed and never calls upstream", async () => {
 
 test("upstream non-2xx responses preserve useful status while sanitizing all details", async () => {
   const cases = [
+    [302, 502, "upstream_redirect_rejected"],
     [401, 401, "authentication_failed"],
     [403, 403, "permission_denied"],
     [429, 429, "upstream_rate_limited"],

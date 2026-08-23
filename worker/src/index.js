@@ -358,7 +358,8 @@ async function proxyUpstream(request, env, origin, slot, publicBody, options) {
 
   let upstream;
   try {
-    upstream = await options.fetchImpl(upstreamUrl, {
+    const fetchImpl = options.fetchImpl;
+    upstream = await fetchImpl(upstreamUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -366,7 +367,9 @@ async function proxyUpstream(request, env, origin, slot, publicBody, options) {
         "x-goog-api-key": secret
       },
       body: JSON.stringify(upstreamBody),
-      redirect: "error",
+      // Keep credentials on the fixed host. `manual` returns any 3xx to this
+      // Worker, where it is rejected as a sanitized upstream error below.
+      redirect: "manual",
       signal: lifecycle.signal
     });
     lifecycle.reset();
@@ -380,6 +383,19 @@ async function proxyUpstream(request, env, origin, slot, publicBody, options) {
       return jsonResponse(504, "upstream_timeout", "The AI service did not respond in time.", origin);
     }
     return jsonResponse(502, "upstream_connection_failed", "The AI service could not be reached.", origin);
+  }
+
+  if (upstream.status >= 300 && upstream.status <= 399) {
+    try {
+      await upstream.body?.cancel("redirect rejected");
+    } catch {}
+    lifecycle.cleanup();
+    return jsonResponse(
+      502,
+      "upstream_redirect_rejected",
+      "The AI service returned an invalid redirect.",
+      origin
+    );
   }
 
   if (!upstream.ok) {
@@ -463,7 +479,10 @@ async function proxyUpstream(request, env, origin, slot, publicBody, options) {
 
 export async function handleRequest(request, env, ctx, options = {}) {
   const url = new URL(request.url);
-  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const providedFetchImpl = options.fetchImpl;
+  const fetchImpl = providedFetchImpl
+    ? (...args) => providedFetchImpl(...args)
+    : (...args) => globalThis.fetch(...args);
   const runtimeOptions = { ...options, fetchImpl };
 
   if (url.pathname === HEALTH_PATH && request.method === "GET") {
