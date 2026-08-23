@@ -1,18 +1,18 @@
-const CACHE_NAME = "matematika-pwa-v21";
+const CACHE_NAME = "matematika-pwa-v23";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./icon.svg",
-  "./app-v5/part-0.txt?v=15",
-  "./app-v5/part-1.txt?v=15",
-  "./app-v5/part-2.txt?v=15",
-  "./app-v5/part-3.txt?v=15",
-  "./app-v5/part-4.txt?v=15",
-  "./app-v5/part-5a.txt?v=15",
-  "./app-v5/part-5b.txt?v=15",
-  "./app-v5/part-6.txt?v=15",
-  "./app-v5/part-7.txt?v=15"
+  "./app-v5/part-0.txt?v=17",
+  "./app-v5/part-1.txt?v=17",
+  "./app-v5/part-2.txt?v=17",
+  "./app-v5/part-3.txt?v=17",
+  "./app-v5/part-4.txt?v=17",
+  "./app-v5/part-5a.txt?v=17",
+  "./app-v5/part-5b.txt?v=17",
+  "./app-v5/part-6.txt?v=17",
+  "./app-v5/part-7.txt?v=17"
 ];
 
 self.addEventListener("install", event => {
@@ -40,7 +40,6 @@ self.addEventListener("fetch", event => {
   // OmniVoice has its own app shell and service worker under this subfolder.
   // The mathematics PWA must not intercept or delete its cached files.
   if (url.origin === self.location.origin && url.pathname.startsWith("/resi-zadatak/omnivoice/")) return;
-  if (url.hostname.includes("googleapis.com") || url.hostname.includes("ai.google.dev")) return;
 
   if (request.mode === "navigate") {
     event.respondWith(

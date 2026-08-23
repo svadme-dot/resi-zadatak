@@ -2300,7 +2300,7 @@ window.MathJax = {
   <main id="chat"></main>
 
   <button id="stopGeneration" class="stopGeneration" type="button" hidden
-    aria-label="Zaustavi Gemini odgovor">■ Stop</button>
+    aria-label="Zaustavi odgovor AI asistenta">■ Stop</button>
 
   <div class="composerWrap">
     <div id="previewWrap" class="previewWrap">
@@ -2487,83 +2487,6 @@ window.MathJax = {
       matematičkim formulama, istorijom razgovora i podrškom za kameru i galeriju.
     </p>
 
-    <button id="openAdvancedSettings" class="settingsAdvancedBtn">
-      Napredna podešavanja
-      <span>›</span>
-    </button>
-  </div>
-</div>
-
-<div id="advancedSettingsOverlay" class="settingsOverlay">
-  <div class="settingsPanel">
-    <div class="settingsTopbar">
-      <button id="advancedBack" class="settingsBack" title="Nazad">‹</button>
-      <div class="settingsTitleGrow">
-        <div class="settingsKicker">Podešavanja</div>
-        <h2>Napredna podešavanja</h2>
-      </div>
-      <button id="advancedClose" class="settingsClose" title="Zatvori">×</button>
-    </div>
-
-    <div class="advancedList">
-      <button id="openApiSettings" class="advancedItem">
-        <span class="advancedIcon">🔑</span>
-        <span class="advancedText">
-          <strong>API ključevi</strong>
-          <small>4 rezervna slota · redom 1 → 2 → 3 → 4</small>
-        </span>
-        <span class="advancedChevron">›</span>
-      </button>
-    </div>
-  </div>
-</div>
-
-<div id="keyOverlay" class="overlay">
-  <div class="card googleApiCard">
-    <div class="googleApiTopbar">
-      <button id="googleApiBack" class="googleApiNavBtn" type="button" title="Nazad" aria-label="Nazad">←</button>
-      <h2>API ključevi</h2>
-      <button id="googleApiClose" class="googleApiNavBtn googleApiCloseBtn" type="button" title="Zatvori" aria-label="Zatvori">×</button>
-    </div>
-    <p>
-      Aplikacija koristi <b>Gemini 3.6 Flash: API 1 → 2 → 3 → 4</b>.
-      Na sledeći pokušaj prelazi samo kada model nije dostupan ili ne podržava
-      zahtev, kada ključ, kvota ili Google servis zakažu, i to pre nego što se
-      pojavi bilo koji deo odgovora.
-      Slot bez ključa se preskače.
-    </p>
-
-    <div class="apiSlots">
-      <div class="apiSlot">
-        <div class="apiSlotHead"><strong>API ključ 1</strong><span>primarni</span></div>
-        <input id="googleModel1" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
-        <input id="googleKey1" class="field" type="password" autocomplete="off" placeholder="API ključ 1">
-      </div>
-
-      <div class="apiSlot">
-        <div class="apiSlotHead"><strong>API ključ 2</strong><span>rezerva</span></div>
-        <input id="googleModel2" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
-        <input id="googleKey2" class="field" type="password" autocomplete="off" placeholder="API ključ 2">
-      </div>
-
-      <div class="apiSlot">
-        <div class="apiSlotHead"><strong>API ključ 3</strong><span>rezerva</span></div>
-        <input id="googleModel3" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
-        <input id="googleKey3" class="field" type="password" autocomplete="off" placeholder="API ključ 3">
-      </div>
-
-      <div class="apiSlot">
-        <div class="apiSlotHead"><strong>API ključ 4</strong><span>poslednja rezerva</span></div>
-        <input id="googleModel4" class="field apiModelField" type="text" autocomplete="off" value="gemini-3.6-flash" readonly aria-readonly="true">
-        <input id="googleKey4" class="field" type="password" autocomplete="off" placeholder="API ključ 4">
-      </div>
-    </div>
-
-    <button id="saveKey" class="primary">Sačuvaj API ključeve</button>
-    <p class="note">
-      Sva četiri ključa koriste <b>Gemini 3.6 Flash</b> redom od API 1 do API 4.
-      Ključevi se čuvaju samo lokalno u <b>localStorage</b>.
-    </p>
   </div>
 </div>
 
@@ -2571,32 +2494,41 @@ window.MathJax = {
 (() => {
   "use strict";
 
-  const PRIMARY_MODEL = "gemini-3.6-flash";
-  const MODEL_ATTEMPT_ORDER = Object.freeze([
-    PRIMARY_MODEL
-  ]);
-  const MODEL_SEQUENCE_LABEL = PRIMARY_MODEL;
   const IMAGE_MEDIA_RESOLUTION = "high";
-  const API_STREAM_URL =
-    "https://generativelanguage.googleapis.com/v1beta/interactions?alt=sse";
-  const API_SYNC_URL =
-    "https://generativelanguage.googleapis.com/v1beta/interactions";
+  const MAX_API_IMAGE_BYTES = 1536 * 1024;
+  const LOCAL_GATEWAY_OVERRIDE =
+    ["127.0.0.1", "localhost"].includes(location.hostname) &&
+    new URLSearchParams(location.search).has("scenario")
+      ? new URL(
+          "/__mock/gateway/v1/interactions" + location.search,
+          location.origin
+        ).href
+      : "";
+  const API_GATEWAY_URL = String(
+    LOCAL_GATEWAY_OVERRIDE ||
+    "https://resi-zadatak-api.REPLACE_WITH_ACCOUNT_SUBDOMAIN.workers.dev/v1/interactions"
+  ).trim();
+  const API_SLOT_ORDER = Object.freeze([1, 2, 3, 4]);
 
-  // Novi Google-only fallback sistem: 4 potpuno odvojena slota.
-  const GOOGLE_PROFILES_STORAGE = "matematika_google_api_profiles_v1";
+  const LEGACY_PROVIDER_PREFIX = ["ge", "mi", "ni"].join("");
+  const LEGACY_KEY_STORAGE =
+    LEGACY_PROVIDER_PREFIX + "_api_key_persistent_v1";
+  const LEGACY_PROFILES_STORAGE =
+    "matematika_google_api_profiles_v1";
+  const LEGACY_CHATS_STORAGE =
+    LEGACY_PROVIDER_PREFIX + "_mobile_chats_v1";
+  const LEGACY_CHAT_ZOOM_STORAGE =
+    LEGACY_PROVIDER_PREFIX + "_school_chat_zoom_v1";
+  const LEGACY_OLD_CHAT_STORAGE =
+    LEGACY_PROVIDER_PREFIX + "_mobile_chat_v4";
 
-  // Stari single-key storage ostaje samo zbog automatske migracije u slot 1.
-  const KEY_STORAGE = "gemini_api_key_persistent_v1";
-  const CHATS_STORAGE = "gemini_mobile_chats_v1";
-  const CHAT_ZOOM_STORAGE = "gemini_school_chat_zoom_v1";
+  const CHATS_STORAGE = "matematika_chats_v2";
+  const CHAT_ZOOM_STORAGE = "matematika_chat_zoom_v2";
   const THEME_STORAGE = "matematika_theme_v1";
   const USED_IMAGES_GRID_STORAGE = "matematika_used_images_grid_v1";
 
   const IMAGE_DB_NAME = "matematika_chat_images_v1";
   const IMAGE_DB_STORE = "images";
-
-  // Stari ključevi samo za jednokratnu migraciju prethodne verzije.
-  const OLD_CHAT_STORAGE = "gemini_mobile_chat_v4";
 
   const DEFAULT_IMAGE_PROMPT = "Reši zadatak korak po korak da bude jasno svakom.";
 
@@ -2629,9 +2561,6 @@ window.MathJax = {
   const preview = el("preview");
   const previewWrap = el("previewWrap");
   const statusEl = el("status");
-  const keyOverlay = el("keyOverlay");
-  const googleModelInputs = [1,2,3,4].map(i => el(`googleModel${i}`));
-  const googleKeyInputs = [1,2,3,4].map(i => el(`googleKey${i}`));
   const usedImagesDrawer = el("usedImagesDrawer");
   const usedImagesBackdrop = el("usedImagesBackdrop");
   const usedImagesGrid = el("usedImagesGrid");
@@ -2647,16 +2576,13 @@ window.MathJax = {
   const mobileNav = el("mobileNav");
   const mobileNavBackdrop = el("mobileNavBackdrop");
   const settingsOverlay = el("settingsOverlay");
-  const advancedSettingsOverlay = el("advancedSettingsOverlay");
 
   let busy = false;
   let sendPreparing = false;
   let activeSolveController = null;
   let userStopRequested = false;
   let stopButtonHideTimer = null;
-  let waitingForInitialApiKey = false;
   let selectedImage = null;
-  let keyDialogBackTarget = "";
 
   // Svi završeni/započeti chatovi ostaju lokalno sačuvani.
   let chats = loadChats();
@@ -2682,11 +2608,29 @@ window.MathJax = {
     return Math.min(CHAT_ZOOM_MAX, Math.max(CHAT_ZOOM_MIN, n));
   }
 
+  function removeLegacyBrowserSecrets() {
+    try {
+      localStorage.removeItem(LEGACY_KEY_STORAGE);
+      localStorage.removeItem(LEGACY_PROFILES_STORAGE);
+    } catch {}
+  }
+
+  removeLegacyBrowserSecrets();
+
   function loadChatZoom() {
     try {
-      return clampChatZoom(
-        parseFloat(localStorage.getItem(CHAT_ZOOM_STORAGE) || "1")
-      );
+      let raw = localStorage.getItem(CHAT_ZOOM_STORAGE);
+
+      if (raw === null) {
+        raw = localStorage.getItem(LEGACY_CHAT_ZOOM_STORAGE);
+
+        if (raw !== null) {
+          localStorage.setItem(CHAT_ZOOM_STORAGE, raw);
+          localStorage.removeItem(LEGACY_CHAT_ZOOM_STORAGE);
+        }
+      }
+
+      return clampChatZoom(parseFloat(raw || "1"));
     } catch {
       return 1;
     }
@@ -3189,7 +3133,7 @@ window.MathJax = {
     if (items.length) return items;
 
     try {
-      const raw = localStorage.getItem(OLD_CHAT_STORAGE);
+      const raw = localStorage.getItem(LEGACY_OLD_CHAT_STORAGE);
       const oldMessages = raw ? JSON.parse(raw) : [];
       if (!Array.isArray(oldMessages) || !oldMessages.length) return items;
 
@@ -3204,6 +3148,7 @@ window.MathJax = {
         messages: safeMessages(oldMessages)
       };
 
+      localStorage.removeItem(LEGACY_OLD_CHAT_STORAGE);
       return [migrated];
     } catch {
       return items;
@@ -3213,7 +3158,17 @@ window.MathJax = {
   function loadChats() {
     let items = [];
     try {
-      const raw = localStorage.getItem(CHATS_STORAGE);
+      let raw = localStorage.getItem(CHATS_STORAGE);
+
+      if (raw === null) {
+        raw = localStorage.getItem(LEGACY_CHATS_STORAGE);
+
+        if (raw !== null) {
+          localStorage.setItem(CHATS_STORAGE, raw);
+          localStorage.removeItem(LEGACY_CHATS_STORAGE);
+        }
+      }
+
       const parsed = raw ? JSON.parse(raw) : [];
       if (Array.isArray(parsed)) items = parsed;
     } catch {}
@@ -3297,7 +3252,7 @@ window.MathJax = {
     }
   }
 
-  function startNewChat() {
+  function startNewChat(focusPrompt = true) {
     if (busy || sendPreparing) return;
 
     activeChatId = makeChatId();
@@ -3311,7 +3266,7 @@ window.MathJax = {
     render();
     renderHistoryList();
     closeHistory();
-    promptEl.focus();
+    if (focusPrompt) promptEl.focus();
   }
 
   function openSavedChat(id) {
@@ -3342,7 +3297,7 @@ window.MathJax = {
     const chat = chats.find(c => c.id === id);
     if (!chat) return;
 
-    if (!confirm(`Obrisati chat "${chat.title}"?`)) return;
+    if (!confirm(`Obrisati chat "${sanitizeServiceMessage(chat.title)}"?`)) return;
 
     const imageIds = (chat.messages || [])
       .map(m => m?.imageId)
@@ -3566,7 +3521,9 @@ window.MathJax = {
 
       const title = document.createElement("div");
       title.className = "usedImageTitle";
-      title.textContent = item.chatTitle || item.text || "Zadatak";
+      title.textContent = sanitizeServiceMessage(
+        item.chatTitle || item.text || "Zadatak"
+      );
 
       const date = document.createElement("div");
       date.className = "usedImageDate";
@@ -3651,7 +3608,7 @@ window.MathJax = {
 
       const title = document.createElement("span");
       title.className = "historyTitle";
-      title.textContent = chat.title || "Chat";
+      title.textContent = sanitizeServiceMessage(chat.title || "Chat");
 
       const date = document.createElement("span");
       date.className = "historyDate";
@@ -3738,20 +3695,6 @@ window.MathJax = {
     settingsOverlay.classList.remove("show");
   }
 
-  function openAdvancedSettings() {
-    settingsOverlay.classList.remove("show");
-    advancedSettingsOverlay.classList.add("show");
-  }
-
-  function closeAdvancedSettings() {
-    advancedSettingsOverlay.classList.remove("show");
-  }
-
-  function backToSettings() {
-    advancedSettingsOverlay.classList.remove("show");
-    settingsOverlay.classList.add("show");
-  }
-
   function openMobileNav() {
     mobileNav.classList.add("show");
     mobileNavBackdrop.classList.add("show");
@@ -3774,162 +3717,12 @@ window.MathJax = {
     historyBackdrop.classList.remove("show");
   }
 
-  function normalizeGoogleProfile(raw, slot) {
-    return {
-      slot,
-      key: String(raw?.key || "").trim(),
-      // U localStorage čuvamo samo primarni prikaz modela; stvarni niz
-      // pokušaja se uvek gradi iz MODEL_ATTEMPT_ORDER.
-      model: PRIMARY_MODEL
-    };
+  function getApiProfiles() {
+    return API_SLOT_ORDER.map(slot => ({ slot }));
   }
 
-  function loadGoogleProfiles() {
-    let profiles = null;
-
-    try {
-      const raw = JSON.parse(
-        localStorage.getItem(GOOGLE_PROFILES_STORAGE) || "null"
-      );
-
-      if (Array.isArray(raw)) {
-        profiles = [1,2,3,4].map(slot =>
-          normalizeGoogleProfile(raw[slot - 1], slot)
-        );
-      }
-    } catch {}
-
-    if (!profiles) {
-      profiles = [1,2,3,4].map(slot =>
-        normalizeGoogleProfile({}, slot)
-      );
-
-      // Automatski prenesi stari Gemini ključ u Google API 1.
-      const legacyKey =
-        localStorage.getItem(KEY_STORAGE) || "";
-
-      if (legacyKey) {
-        profiles[0].key = legacyKey;
-        profiles[0].model = PRIMARY_MODEL;
-      }
-    }
-
-    try {
-      localStorage.setItem(
-        GOOGLE_PROFILES_STORAGE,
-        JSON.stringify(
-          profiles.map(profile => ({
-            key: profile.key,
-            model: PRIMARY_MODEL
-          }))
-        )
-      );
-    } catch {}
-
-    return profiles;
-  }
-
-  function saveGoogleProfiles(profiles) {
-    const clean = [1,2,3,4].map(slot => {
-      const p = normalizeGoogleProfile(
-        profiles?.[slot - 1],
-        slot
-      );
-      return {
-        key: p.key,
-        model: p.model
-      };
-    });
-
-    localStorage.setItem(
-      GOOGLE_PROFILES_STORAGE,
-      JSON.stringify(clean)
-    );
-
-    // Kompatibilnost sa starim verzijama aplikacije:
-    // slot 1 ostaje upisan i u starom single-key storage-u.
-    if (clean[0].key) {
-      localStorage.setItem(KEY_STORAGE, clean[0].key);
-    } else {
-      localStorage.removeItem(KEY_STORAGE);
-    }
-
-    return clean;
-  }
-
-  function getConfiguredGoogleProfiles() {
-    const configuredSlots = loadGoogleProfiles()
-      .filter(profile => profile.key);
-
-    // Tačan redosled: Gemini 3.6 preko API ključeva 1, 2, 3 i 4.
-    return MODEL_ATTEMPT_ORDER.flatMap(model =>
-      configuredSlots.map(profile => ({
-        slot: profile.slot,
-        key: profile.key,
-        model
-      }))
-    );
-  }
-
-  function googleProfileId(profile) {
-    return `${profile.slot}:${profile.model}`;
-  }
-
-  function modelDisplayName(model) {
-    if (model === PRIMARY_MODEL) return "Gemini 3.6 Flash";
-    return String(model || "Gemini");
-  }
-
-  function requireAttemptModel(model) {
-    const value = String(model || "").trim();
-
-    if (!MODEL_ATTEMPT_ORDER.includes(value)) {
-      const err = new Error(
-        "Interna greška konfiguracije Gemini pokušaja."
-      );
-      err.code = "LOCAL_INVALID_MODEL";
-      throw err;
-    }
-
-    return value;
-  }
-
-  function populateGoogleApiDialog() {
-    const profiles = loadGoogleProfiles();
-
-    for (let i = 0; i < 4; i++) {
-      googleModelInputs[i].value = MODEL_SEQUENCE_LABEL;
-      googleKeyInputs[i].value =
-        profiles[i].key || "";
-    }
-  }
-
-  function openKeyDialog(backTarget = "") {
-    keyDialogBackTarget = backTarget;
-    populateGoogleApiDialog();
-    keyOverlay.classList.add("show");
-
-    const firstEmpty =
-      googleKeyInputs.find(input => !input.value.trim());
-
-    setTimeout(
-      () => (firstEmpty || googleKeyInputs[0]).focus(),
-      50
-    );
-  }
-
-  function closeKeyDialog() {
-    keyOverlay.classList.remove("show");
-  }
-
-  function backFromKeyDialog() {
-    const target = keyDialogBackTarget;
-    closeKeyDialog();
-    keyDialogBackTarget = "";
-
-    if (target === "advanced") {
-      openAdvancedSettings();
-    }
+  function apiProfileId(profile) {
+    return String(profile.slot);
   }
 
   function setStatus(text = "", error = false) {
@@ -4071,11 +3864,14 @@ window.MathJax = {
     );
   }
 
-  function canUseNextGoogleProfile(err) {
+  function canUseNextApiProfile(err) {
+    if (String(err?.code || "") === "rate_control_unavailable") {
+      return false;
+    }
     if (!isEligibleProfileFallbackError(err)) return false;
     if (!hasVisibleLiveOutput()) return true;
 
-    // Thought summary nije finalni odgovor. Ako Google eksplicitno javi
+    // Thought summary nije finalni odgovor. Ako servis eksplicitno javi
     // high demand/preopterećenje, bezbedno ga odbaci i probaj sledeći profil.
     // Čim je finalni odgovor počeo, nikakav fallback ga ne briše.
     return (
@@ -4105,10 +3901,10 @@ window.MathJax = {
       return "kvota je trenutno iscrpljena";
     }
     if ([500, 502, 503, 504].includes(status)) {
-      return `Google servis je privremeno nedostupan (HTTP ${status})`;
+      return `AI servis je privremeno nedostupan (HTTP ${status})`;
     }
     if (/high demand|temporar|try again|unavailable|overloaded/i.test(message)) {
-      return "Google servis je privremeno zauzet";
+      return "AI servis je privremeno zauzet";
     }
     return "mrežna veza je prekinuta pre nego što je stigao odgovor";
   }
@@ -4146,7 +3942,7 @@ window.MathJax = {
   function balanceMathDelimitersForRender(source) {
     let s = String(source ?? "");
 
-    // Ako Gemini tokom streama još nije zatvorio formulu, privremeno je
+    // Ako servis tokom streama još nije zatvorio formulu, privremeno je
     // zatvaramo samo u kopiji za prikaz. Originalni odgovor se ne menja.
     const opensBracket = countToken(s, "\\[");
     const closesBracket = countToken(s, "\\]");
@@ -4164,7 +3960,7 @@ window.MathJax = {
     const displayDollarCount = (s.match(/(?<!\\)\$\$/g) || []).length;
     if (displayDollarCount % 2 === 1) s += "$$";
 
-    // Jednostruki $...$ (fallback za Gemini kada ipak koristi dolare).
+    // Jednostruki $...$ kao fallback kada servis ipak koristi dolare.
     const withoutDouble = s.replace(/(?<!\\)\$\$/g, "");
     const singleMatches = withoutDouble.match(/(?<!\\)\$(?!\$)/g) || [];
     if (singleMatches.length % 2 === 1) {
@@ -4190,7 +3986,7 @@ window.MathJax = {
       s += `\n${lastFence.startsWith("~") ? "~~~" : "```"}`;
     }
 
-    // Gemini ponekad stavi čistu formulu u latex/tex/math code fence.
+    // Servis ponekad stavi čistu formulu u latex/tex/math code fence.
     s = s.replace(
       /(?:```|~~~)(?:latex|tex|math)\s*\n([\s\S]*?)(?:```|~~~)/gi,
       (_, body) => `\n\\[\n${String(body).trim()}\n\\]\n`
@@ -4490,7 +4286,7 @@ window.MathJax = {
       return `@@ESC${i}@@`;
     });
 
-    // Nekoliko bezbednih HTML tagova koje Gemini ponekad koristi uprkos promptu.
+    // Nekoliko bezbednih HTML tagova koje servis ponekad koristi uprkos promptu.
     const safeHtml = [];
     raw = raw.replace(/<\/?(?:br\s*\/?|sup|sub|mark)>/gi, tag => {
       const i = safeHtml.length;
@@ -4974,7 +4770,7 @@ window.MathJax = {
 
   function renderModelContent(container, text, final = false) {
     if (!container) return;
-    container.innerHTML = markdownToHtml(text);
+    container.innerHTML = markdownToHtml(sanitizeServiceMessage(text));
     cleanupRenderedMarkdown(container);
     scheduleMath(container, final);
   }
@@ -4998,7 +4794,7 @@ window.MathJax = {
 
     const role = document.createElement("div");
     role.className = "role";
-    role.textContent = m.role === "user" ? "Ti" : "Gemini";
+    role.textContent = m.role === "user" ? "Ti" : "AI asistent";
     bubble.appendChild(role);
 
     if (m.role === "user" && m.hadImage) {
@@ -5080,7 +4876,7 @@ window.MathJax = {
 
     const role = document.createElement("div");
     role.className = "role";
-    role.textContent = "Gemini";
+    role.textContent = "AI asistent";
     bubble.appendChild(role);
 
     const details = document.createElement("details");
@@ -5173,7 +4969,7 @@ window.MathJax = {
       liveModel.thinkingTimer.textContent =
         `Razmišljao ${formatThinkingTime(liveModel.thinkingMs)}`;
 
-      // Kao u Gemini UI: dok razmišlja otvoreno, kada krene finalni odgovor
+      // Dok razmišlja ostaje otvoreno; kada krene finalni odgovor
       // sažetak se sklopi ali ostaje dostupan na klik.
       const dots = liveModel.details.querySelector(".thinkingLive");
       if (dots) dots.innerHTML = `<span style="color:#77869d">gotovo</span>`;
@@ -5329,22 +5125,42 @@ window.MathJax = {
     }
 
     const bitmap = await createImageBitmap(file);
-    const maxSide = 1800;
-    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
-    const w = Math.max(1, Math.round(bitmap.width * scale));
-    const h = Math.max(1, Math.round(bitmap.height * scale));
-
     const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(bitmap, 0, 0, w, h);
-    bitmap.close?.();
+    const encodings = [
+      [1800, 0.9],
+      [1800, 0.82],
+      [1600, 0.82],
+      [1450, 0.8],
+      [1280, 0.78],
+      [1100, 0.76]
+    ];
+    let blob = null;
 
-    const blob = await new Promise(resolve =>
-      canvas.toBlob(resolve, "image/jpeg", 0.9)
-    );
+    for (const [maxSide, quality] of encodings) {
+      const scale = Math.min(
+        1,
+        maxSide / Math.max(bitmap.width, bitmap.height)
+      );
+      const w = Math.max(1, Math.round(bitmap.width * scale));
+      const h = Math.max(1, Math.round(bitmap.height * scale));
+
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(bitmap, 0, 0, w, h);
+
+      blob = await new Promise(resolve =>
+        canvas.toBlob(resolve, "image/jpeg", quality)
+      );
+
+      if (blob && blob.size <= MAX_API_IMAGE_BYTES) break;
+    }
+
+    bitmap.close?.();
     if (!blob) throw new Error("Ne mogu da obradim sliku.");
+    if (blob.size > MAX_API_IMAGE_BYTES) {
+      throw new Error("Slika je prevelika. Izaberi jasniju ili manju fotografiju.");
+    }
 
     const dataUrl = await new Promise((resolve, reject) => {
       const r = new FileReader();
@@ -5393,13 +5209,21 @@ window.MathJax = {
     }
 
     try {
+      let apiBlob = blob;
+
+      if (blob.size > MAX_API_IMAGE_BYTES) {
+        const prepared = await prepareImage(blob);
+        apiBlob = prepared.blob;
+        try { URL.revokeObjectURL(prepared.previewUrl); } catch {}
+      }
+
       const dataUrl = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result);
         reader.onerror = () => reject(
           reader.error || new Error("Ne mogu da pročitam sačuvanu sliku.")
         );
-        reader.readAsDataURL(blob);
+        reader.readAsDataURL(apiBlob);
       });
 
       const encoded = String(dataUrl || "");
@@ -5410,7 +5234,7 @@ window.MathJax = {
 
       return {
         data,
-        mimeType: blob.type
+        mimeType: apiBlob.type
       };
     } catch (err) {
       console.warn("[Ne mogu da pripremim sačuvanu sliku]", err);
@@ -5505,7 +5329,7 @@ window.MathJax = {
     ];
 
     for (const m of items) {
-      const who = m.role === "model" ? "Gemini" : "Korisnik";
+      const who = m.role === "model" ? "Asistent" : "Korisnik";
       lines.push(`${who}: ${m.text}`);
     }
 
@@ -5547,28 +5371,17 @@ window.MathJax = {
   function buildInteractionRequest(
     text,
     img,
-    model,
     usePreviousId = true,
     excludeTrailingUser = false
   ) {
     const body = {
-      model: requireAttemptModel(model),
       input: buildInteractionInput(
         text,
         img,
         !usePreviousId && history.length > 0,
         excludeTrailingUser
       ),
-      stream: true,
-      store: true,
-      system_instruction: SYSTEM_INSTRUCTION,
-      tools: [
-        { type: "code_execution" }
-      ],
-      generation_config: {
-        thinking_level: "high",
-        thinking_summaries: "auto"
-      }
+      stream: true
     };
 
     if (usePreviousId && previousInteractionId) {
@@ -5644,6 +5457,18 @@ window.MathJax = {
     return out.trim();
   }
 
+  function sanitizeServiceMessage(value) {
+    const providerPattern = new RegExp(
+      LEGACY_PROVIDER_PREFIX +
+      "(?:(?:-[a-z0-9._-]+)|(?:\\s+\\d+(?:\\.\\d+)*(?:\\s+[a-z]+)?))?",
+      "gi"
+    );
+
+    return String(value || "")
+      .replace(providerPattern, "AI servis")
+      .replace(/Google\s+(?:AI servis|API|servis)/gi, "AI servis");
+  }
+
   function terminalInteractionError(interaction, fallbackStatus = "") {
     const status = String(
       interaction?.status || fallbackStatus || "failed"
@@ -5663,6 +5488,7 @@ window.MathJax = {
           ""
         ).trim()
       )
+      .map(sanitizeServiceMessage)
       .filter(Boolean);
 
     const firstCode =
@@ -5783,14 +5609,14 @@ window.MathJax = {
     }, 100);
   }
 
-  async function fetchInteraction(body, key, signal) {
+  async function fetchInteraction(body, slot, signal) {
     throwIfUserStopped(signal);
-    const response = await fetch(API_STREAM_URL, {
+    const response = await fetch(API_GATEWAY_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Accept": "text/event-stream",
-        "x-goog-api-key": key
+        "X-Math-Api-Slot": String(slot)
       },
       body: JSON.stringify(body),
       signal
@@ -5798,13 +5624,18 @@ window.MathJax = {
 
     if (!response.ok) {
       let msg = `HTTP ${response.status}`;
+      let code = "";
       try {
         const data = await response.json();
-        msg = data?.error?.message || data?.message || msg;
+        code = String(data?.error?.code || data?.code || "");
+        msg = sanitizeServiceMessage(
+          data?.error?.message || data?.message || msg
+        );
       } catch {}
 
       const err = new Error(msg);
       err.status = response.status;
+      err.code = code;
       throw err;
     }
 
@@ -5816,8 +5647,8 @@ window.MathJax = {
   }
 
   // Robustan SSE reader: ne zavisi od toga gde browser iseče mrežni chunk.
-  async function streamInteraction(body, key, signal) {
-    const response = await fetchInteraction(body, key, signal);
+  async function streamInteraction(body, slot, signal) {
+    const response = await fetchInteraction(body, slot, signal);
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
 
@@ -5854,9 +5685,11 @@ window.MathJax = {
 
       if (type === "error") {
         const err = new Error(
-          event?.error?.message ||
-          event?.message ||
-          "Gemini Interactions stream error."
+          sanitizeServiceMessage(
+            event?.error?.message ||
+            event?.message ||
+            "AI streaming greška."
+          )
         );
         err.code = event?.error?.code || "";
         throw err;
@@ -5991,7 +5824,7 @@ window.MathJax = {
       if (line.startsWith("data:")) {
         pendingDataLines.push(line.slice(5).trimStart());
 
-        // Gemini uglavnom šalje jedan JSON po data: redu.
+        // Servis uglavnom šalje jedan JSON po data: redu.
         if (pendingDataLines.length === 1) {
           const raw = pendingDataLines[0].trim();
           if (raw && raw !== "[DONE]") {
@@ -6046,8 +5879,7 @@ window.MathJax = {
   async function requestInteractionOnce(
     text,
     img,
-    key,
-    model,
+    slot,
     profileId,
     signal,
     excludeTrailingUser = false
@@ -6062,19 +5894,18 @@ window.MathJax = {
       buildInteractionRequest(
         text,
         img,
-        model,
         usePreviousId,
         excludeTrailingUser
       );
 
     body.stream = false;
 
-    const response = await fetch(API_SYNC_URL, {
+    const response = await fetch(API_GATEWAY_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "x-goog-api-key": key
+        "X-Math-Api-Slot": String(slot)
       },
       body: JSON.stringify(body),
       signal
@@ -6087,9 +5918,11 @@ window.MathJax = {
 
     if (!response.ok) {
       const msg =
-        data?.error?.message ||
-        data?.message ||
-        `HTTP ${response.status}`;
+        sanitizeServiceMessage(
+          data?.error?.message ||
+          data?.message ||
+          `HTTP ${response.status}`
+        );
 
       const err = new Error(msg);
       err.status = response.status;
@@ -6097,7 +5930,7 @@ window.MathJax = {
     }
 
     if (!data || typeof data !== "object") {
-      throw new Error("Gemini je vratio prazan non-streaming odgovor.");
+      throw new Error("AI servis je vratio prazan odgovor.");
     }
 
     return {
@@ -6114,8 +5947,7 @@ window.MathJax = {
   async function requestInteractionOnceWithRetry(
     text,
     img,
-    key,
-    model,
+    slot,
     profileId,
     signal,
     excludeTrailingUser = false
@@ -6128,8 +5960,7 @@ window.MathJax = {
         return await requestInteractionOnce(
           text,
           img,
-          key,
-          model,
+          slot,
           profileId,
           signal,
           excludeTrailingUser
@@ -6164,14 +5995,13 @@ window.MathJax = {
       }
     }
 
-    throw lastErr || new Error("Gemini fallback nije uspeo.");
+    throw lastErr || new Error("Rezervni AI pokušaj nije uspeo.");
   }
 
   async function runInteractionWithRecovery(
     text,
     img,
-    key,
-    model,
+    slot,
     profileId,
     signal,
     excludeTrailingUser = false
@@ -6188,12 +6018,11 @@ window.MathJax = {
           buildInteractionRequest(
             text,
             img,
-            model,
             usePreviousId,
             excludeTrailingUser
           );
 
-        return await streamInteraction(body, key, signal);
+        return await streamInteraction(body, slot, signal);
       } catch (err) {
         if (isUserStopError(err, signal)) {
           throw new UserStopError();
@@ -6216,17 +6045,20 @@ window.MathJax = {
         }
 
         // Zadržavamo mali retry unutar ISTOG slota za prolazne serverske greške.
-        // Ako ni to ne uspe, send() prelazi na sledeći Google slot.
+        // Ako ni to ne uspe, send() prelazi na sledeći API slot.
         if (
           attempt < 2 &&
           isRetriableDemandError(err) &&
+          !["slot_rate_limited", "slot_unavailable"].includes(
+            String(err?.code || "")
+          ) &&
           !isModelCapabilityFallbackError(err) &&
           !hasVisibleLiveOutput()
         ) {
           const wait = attempt === 0 ? 700 : 1400;
 
           setStatus(
-            `Google API je privremeno zauzet — pokušavam još jednom…`
+            `AI servis je privremeno zauzet — pokušavam još jednom…`
           );
 
           resetLiveModelForRetry("Ponovni pokušaj…");
@@ -6239,7 +6071,7 @@ window.MathJax = {
     }
 
     throw new Error(
-      "Google API nije uspeo posle ponovnih pokušaja."
+      "AI servis nije uspeo posle ponovnih pokušaja."
     );
   }
 
@@ -6247,7 +6079,7 @@ window.MathJax = {
     const value = String(message?.text || "");
     return (
       message?.role === "model" &&
-      /(?:^|\n)⚠\s*Greška|Greška pri (?:pozivu|završetku)|Nijedan Google API nije uspeo/i.test(value)
+      /(?:^|\n)⚠\s*Greška|Greška pri (?:pozivu|završetku)|Nijedan API pokušaj nije uspeo/i.test(value)
     );
   }
 
@@ -6407,13 +6239,7 @@ window.MathJax = {
     let requestImage = null;
 
     try {
-      profiles = getConfiguredGoogleProfiles();
-
-      if (!profiles.length) {
-        waitingForInitialApiKey = true;
-        openKeyDialog();
-        return;
-      }
+      profiles = getApiProfiles();
 
       requestText = promptEl.value.trim();
       requestImage = selectedImage;
@@ -6556,16 +6382,16 @@ window.MathJax = {
     try {
       for (let index = 0; index < profiles.length; index++) {
         const profile = profiles[index];
-        const profileId = googleProfileId(profile);
+        const profileId = apiProfileId(profile);
 
         if (index > 0) {
           resetLiveModelForRetry(
-            `Prelazim na Google API ${profile.slot} · ${modelDisplayName(profile.model)}…`
+            `Prelazim na rezervni API pokušaj ${profile.slot}…`
           );
         }
 
         setStatus(
-          `Google API ${profile.slot} · ${profile.model}…`
+          `AI servis · pokušaj ${profile.slot}…`
         );
 
         try {
@@ -6573,18 +6399,11 @@ window.MathJax = {
             await runInteractionWithRecovery(
               requestText,
               requestImage,
-              profile.key,
-              profile.model,
+              profile.slot,
               profileId,
               solveSignal,
               true
             );
-
-          console.debug(
-            `[Google API ${profile.slot} stream]`,
-            profile.model,
-            result
-          );
 
           // Završni status failed/cancelled je autoritativan: ne šalji novi
           // sync zahtev istom profilu, već klasifikuj razlog i eventualno
@@ -6605,25 +6424,18 @@ window.MathJax = {
             }
 
             setStatus(
-              `Google API ${profile.slot} · dovršavam odgovor…`
+              `AI servis · dovršavam odgovor…`
             );
 
             result =
               await requestInteractionOnceWithRetry(
                 requestText,
                 requestImage,
-                profile.key,
-                profile.model,
+                profile.slot,
                 profileId,
                 solveSignal,
                 true
               );
-
-            console.debug(
-              `[Google API ${profile.slot} sync]`,
-              profile.model,
-              result
-            );
 
             throwIfTerminalInteractionFailed(result);
           }
@@ -6672,14 +6484,14 @@ window.MathJax = {
 
           finishLiveModel();
 
-          // Naslov se izvodi lokalno, bez skrivenog dodatnog Gemini zahteva.
+          // Naslov se izvodi lokalno, bez skrivenog dodatnog AI zahteva.
           maybeGenerateChatTitle(solvedChatId);
 
           if (index === 0) {
             setStatus("");
           } else {
             setStatus(
-              `Rešeno preko Google API ${profile.slot} · ${profile.model}`
+              `Rešeno preko rezervnog API pokušaja ${profile.slot}`
             );
             setTimeout(() => {
               if (!busy) setStatus("");
@@ -6692,21 +6504,21 @@ window.MathJax = {
             throw new UserStopError();
           }
 
-          const msg =
-            err?.message || String(err);
+          const msg = sanitizeServiceMessage(
+            err?.message || String(err)
+          );
 
           failures.push(
-            `Google API ${profile.slot} (${profile.model}): ${msg}`
+            `API pokušaj ${profile.slot}: ${msg}`
           );
 
           console.warn(
-            `[Google API ${profile.slot} neuspeh]`,
-            profile.model,
-            err
+            `[AI API ${profile.slot} neuspeh]`,
+            msg
           );
 
           const canUseNextProfile =
-            canUseNextGoogleProfile(err);
+            canUseNextApiProfile(err);
 
           if (!canUseNextProfile) {
             throw err;
@@ -6716,7 +6528,7 @@ window.MathJax = {
             const next = profiles[index + 1];
             const reason = profileFallbackReason(err);
             setStatus(
-              `API ${profile.slot} · ${modelDisplayName(profile.model)}: ${reason} — prelazim na API ${next.slot} · ${modelDisplayName(next.model)}…`
+              `API pokušaj ${profile.slot}: ${reason} — prelazim na pokušaj ${next.slot}…`
             );
             await sleep(650, solveSignal);
           }
@@ -6725,13 +6537,14 @@ window.MathJax = {
 
       if (!solved) {
         throw new Error(
-          "Nijedan podešeni Google API nije uspeo.\n\n" +
+          "Nijedan API pokušaj nije uspeo.\n\n" +
           failures.join("\n\n")
         );
       }
     } catch (err) {
-      const message =
-        err?.message || String(err);
+      const message = sanitizeServiceMessage(
+        err?.message || String(err)
+      );
       const stopped = isUserStopError(err, solveSignal);
 
       // Prekinuti turn nije bezbedno nastaviti preko starog server-side ID-a.
@@ -6767,7 +6580,7 @@ window.MathJax = {
           history.push({
             role: "model",
             text:
-              "Greška pri pozivu Google API-ja:\n\n" +
+              "Greška pri pozivu AI servisa:\n\n" +
               message,
             completionState: "interrupted",
             timestamp: Date.now()
@@ -6779,7 +6592,7 @@ window.MathJax = {
         setStatus(
           hadPartial
             ? "Veza je prekinuta; sačuvan je prikazani deo odgovora."
-            : "Google API nije uspeo.",
+            : "AI servis nije uspeo.",
           true
         );
       }
@@ -6798,82 +6611,6 @@ window.MathJax = {
       );
       scrollBottom(true);
     }
-  }
-
-  el("saveKey").addEventListener("click", () => {
-    if (busy || sendPreparing) {
-      setStatus(
-        "Sačekaj da se rešavanje završi ili ga zaustavi pre promene API ključeva.",
-        true
-      );
-      return;
-    }
-
-    const oldProfiles = loadGoogleProfiles();
-    const profiles = [1,2,3,4].map((slot, i) => ({
-      slot,
-      model: PRIMARY_MODEL,
-      key:
-        googleKeyInputs[i].value.trim()
-    }));
-
-    const configured =
-      profiles.filter(p => p.key && p.model);
-
-    if (!configured.length) {
-      googleKeyInputs[0].focus();
-      setStatus(
-        "Unesi bar jedan Google API ključ.",
-        true
-      );
-      return;
-    }
-
-    const keysChanged = profiles.some(
-      (profile, index) =>
-        profile.key !== String(oldProfiles[index]?.key || "")
-    );
-
-    saveGoogleProfiles(profiles);
-
-    // Ako je korisnik promenio ključeve/modele,
-    // stari server-side interaction ID možda pripada drugom profilu.
-    // Lokalna istorija ostaje, pa sledeći zahtev može bezbedno da je rekonstruiše.
-    previousInteractionId = "";
-    previousInteractionProfileId = "";
-
-    if (keysChanged) {
-      for (const chat of chats) {
-        chat.interactionId = "";
-        chat.interactionProfileId = "";
-      }
-      persistChats();
-    }
-
-    closeKeyDialog();
-    setStatus(
-      `Sačuvano Google API slotova: ${configured.length}.`
-    );
-    setTimeout(() => setStatus(""), 1200);
-
-    if (waitingForInitialApiKey) {
-      waitingForInitialApiKey = false;
-      openSourceSheet();
-    }
-  });
-
-  for (const input of [
-    ...googleModelInputs,
-    ...googleKeyInputs
-  ]) {
-    input.addEventListener("keydown", e => {
-      if (
-        e.key === "Enter" &&
-        (e.ctrlKey || e.metaKey)
-      ) {
-        el("saveKey").click();
-      }
-    });
   }
 
   el("keyBtn").addEventListener("click", openSettings);
@@ -6937,7 +6674,7 @@ window.MathJax = {
 
   el("mobileSolveTask").addEventListener("click", () => {
     closeMobileNav();
-    startNewChat();
+    startNewChat(false);
     openSourceSheet();
   });
 
@@ -6961,13 +6698,6 @@ window.MathJax = {
     openSettings();
   });
 
-  el("googleApiBack").addEventListener("click", backFromKeyDialog);
-
-  el("googleApiClose").addEventListener("click", () => {
-    keyDialogBackTarget = "";
-    closeKeyDialog();
-  });
-
   el("settingsClose").addEventListener("click", closeSettings);
 
   el("themeDarkBtn").addEventListener("click", () => {
@@ -6978,18 +6708,11 @@ window.MathJax = {
     applyTheme("light", true);
   });
 
-  el("openAdvancedSettings").addEventListener("click", openAdvancedSettings);
-
-  el("advancedBack").addEventListener("click", backToSettings);
-
-  el("advancedClose").addEventListener("click", closeAdvancedSettings);
-
-  el("openApiSettings").addEventListener("click", () => {
-    closeAdvancedSettings();
-    openKeyDialog("advanced");
-  });
-
   function openSourceSheet() {
+    const active = document.activeElement;
+    if (active?.matches?.('input, textarea, [contenteditable="true"]')) {
+      try { active.blur(); } catch {}
+    }
     sourceSheet.classList.add("show");
   }
 
@@ -6999,7 +6722,7 @@ window.MathJax = {
 
   el("pickImage").addEventListener("click", openSourceSheet);
   el("solveTaskBtn").addEventListener("click", () => {
-    startNewChat();
+    startNewChat(false);
     openSourceSheet();
   });
   el("sourceCancel").addEventListener("click", closeSourceSheet);
@@ -7304,10 +7027,6 @@ window.MathJax = {
       return;
     }
 
-    if (keyOverlay.classList.contains("show")) {
-      keyDialogBackTarget = "";
-      closeKeyDialog();
-    }
   });
 
   promptEl.addEventListener("input", () => {
@@ -7351,12 +7070,7 @@ window.MathJax = {
 
   // Pri svakom svežem otvaranju fajla ostajemo na praznom novom chatu.
   // Glavni početni ekran odmah nudi KAMERU ili GALERIJU.
-  if (!getConfiguredGoogleProfiles().length) {
-    waitingForInitialApiKey = true;
-    openKeyDialog();
-  } else {
-    openSourceSheet();
-  }
+  openSourceSheet();
 })();
 </script>
 

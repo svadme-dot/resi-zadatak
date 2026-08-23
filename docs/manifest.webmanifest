@@ -1,7 +1,7 @@
 {
   "name": "Matematika",
   "short_name": "Matematika",
-  "description": "Aplikacija za rešavanje školskih matematičkih zadataka uz Google Gemini.",
+  "description": "Aplikacija za rešavanje školskih matematičkih zadataka uz AI asistenta.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

@@ -7,8 +7,6 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE = path.resolve(HERE, '..', '..');
 const DOCS_DIR = path.join(WORKSPACE, 'docs');
 const FIXTURES_DIR = path.join(HERE, 'fixtures');
-const GEMINI_ORIGIN =
-  'https://generativelanguage.googleapis.com/v1beta/interactions';
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 4173;
 const MODEL = 'gemini-3.6-flash';
@@ -183,7 +181,13 @@ function evaluateSolverRequest(record) {
       image?.mime_type?.startsWith('image/') === true &&
       isBase64(image?.data),
     imageResolutionHigh:
-      image?.resolution === 'high'
+      image?.resolution === 'high',
+    browserSentNoApiKey:
+      record.browserContract?.sentNoApiKey !== false,
+    browserSentNoModelOrProviderConfig:
+      record.browserContract?.sentNoModelOrProviderConfig !== false,
+    browserUsedAllowedGatewayShape:
+      record.browserContract?.usedAllowedGatewayShape !== false
   };
 
   return {
@@ -966,37 +970,12 @@ function harnessBootstrap() {
     '    localStorage.clear();',
     '    sessionStorage.setItem(freshKey, "1");',
     '  }',
-    '  var allKeys = ["slow", "fallback-four", "partial-no-continue", "sse-error-next-profile", "terminal-failed-next-profile", "thought-high-demand-four", "answer-high-demand-no-fallback", "payload-error-no-fallback"].indexOf(scenario) !== -1;',
-    '  var configuredKeyCount = allKeys ? 4 : scenario === "fallback-429" ? 2 : 1;',
-    '  var profiles = [1, 2, 3, 4].map(function (slot) {',
-    '    return {',
-    '      key: slot <= configuredKeyCount ? "e2e-api-" + slot : "",',
-    '      model: "gemini-3.6-flash"',
-    '    };',
-    '  });',
-    '  localStorage.setItem(',
-    '    "matematika_google_api_profiles_v1",',
-    '    JSON.stringify(profiles)',
-    '  );',
-    '  localStorage.setItem("gemini_api_key_persistent_v1", "e2e-api-1");',
     '  var realFetch = window.fetch.bind(window);',
     '  window.fetch = function (input, init) {',
     '    var raw = typeof input === "string"',
     '      ? input',
     '      : input && input.url ? input.url : String(input || "");',
-    '    if (raw.indexOf(' + JSON.stringify(GEMINI_ORIGIN) + ') === 0) {',
-    '      var original = new URL(raw);',
-    '      var mock = new URL("/__mock/gemini/v1beta/interactions", location.origin);',
-    '      original.searchParams.forEach(function (value, key) {',
-    '        mock.searchParams.append(key, value);',
-    '      });',
-    '      mock.searchParams.set("scenario", scenario);',
-    '      mock.searchParams.set("run", runId);',
-    '      if (typeof Request !== "undefined" && input instanceof Request) {',
-    '        input = new Request(mock.href, input);',
-    '      } else {',
-    '        input = mock.href;',
-    '      }',
+    '    if (raw.indexOf("/__mock/gateway/v1/interactions") !== -1) {',
     '      if (scenario === "retry-after-reload" && window.__MATH_E2E_RETRY__?.onGeminiRequest) {',
     '        try { window.__MATH_E2E_RETRY__.onGeminiRequest(); } catch (error) {',
     '          console.error("[Math E2E retry request hook]", error);',
@@ -1016,7 +995,7 @@ function harnessBootstrap() {
     '    Document.prototype.write = function () {',
     '      var args = Array.prototype.slice.call(arguments);',
     '      Document.prototype.write = originalDocumentWrite;',
-    '      var tag = "<scr" + "ipt src=\"/__harness__/retry-after-reload-driver.js\"></scr" + "ipt>";',
+    '      var tag = "<scr" + "ipt src=\\\"/__harness__/retry-after-reload-driver.js\\\"></scr" + "ipt>";',
     '      args = args.map(function (value) {',
     '        return typeof value === "string"',
     '          ? value.replace(/<\\/body>/i, tag + "</body>")',
@@ -1244,15 +1223,56 @@ export function createHarnessServer() {
         return;
       }
 
-      if (url.pathname === '/__mock/gemini/v1beta/interactions') {
+      if (
+        url.pathname === '/__mock/gemini/v1beta/interactions' ||
+        url.pathname === '/__mock/gateway/v1/interactions'
+      ) {
         if (req.method !== 'POST') {
           sendJson(res, 405, { error: { message: 'POST required.' } });
           return;
         }
 
-        const body = await readJsonBody(req);
+        const incomingBody = await readJsonBody(req);
+        const isGateway = url.pathname === '/__mock/gateway/v1/interactions';
         const scenario = scenarioFrom(url);
-        const apiKey = String(req.headers['x-goog-api-key'] || '');
+        const slot = String(req.headers['x-math-api-slot'] || '');
+        const apiKey = isGateway
+          ? 'e2e-api-' + slot
+          : String(req.headers['x-goog-api-key'] || '');
+        const browserAllowedFields = new Set([
+          'input',
+          'stream',
+          'previous_interaction_id'
+        ]);
+        const browserContract = isGateway
+          ? {
+              sentNoApiKey:
+                !Object.hasOwn(req.headers, 'x-goog-api-key'),
+              sentNoModelOrProviderConfig:
+                !Object.hasOwn(incomingBody, 'model') &&
+                !Object.hasOwn(incomingBody, 'system_instruction') &&
+                !Object.hasOwn(incomingBody, 'tools') &&
+                !Object.hasOwn(incomingBody, 'generation_config'),
+              usedAllowedGatewayShape:
+                /^[1-4]$/.test(slot) &&
+                Object.keys(incomingBody).every(key =>
+                  browserAllowedFields.has(key)
+                )
+            }
+          : null;
+        const body = isGateway
+          ? {
+              ...incomingBody,
+              model: MODEL,
+              store: true,
+              system_instruction: 'Deterministic fixed server-side instruction.',
+              tools: [{ type: 'code_execution' }],
+              generation_config: {
+                thinking_level: 'high',
+                thinking_summaries: 'auto'
+              }
+            }
+          : incomingBody;
         const run = url.searchParams.get('run') || '';
         const scenarioRequestIndex = requestLog.filter(record =>
           record.scenario === scenario &&
@@ -1266,6 +1286,7 @@ export function createHarnessServer() {
           scenarioRequestIndex,
           kind: 'solve',
           apiKey,
+          browserContract,
           request: {
             method: req.method,
             path: url.pathname,

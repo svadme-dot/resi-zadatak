@@ -151,7 +151,9 @@ test('serves an injected app without modifying the production file', async () =>
     assert.equal(response.status, 200);
     const html = await response.text();
     assert.match(html, /math-e2e-bootstrap/);
-    assert.match(html, /__mock\/gemini\/v1beta\/interactions/);
+    assert.match(html, /__mock\/gateway\/v1\/interactions/);
+    assert.doesNotMatch(html, /matematika_google_api_profiles_v1/);
+    assert.doesNotMatch(html, /api_key_persistent_v1/);
 
     const fixture = await fetch(
       base + '/tests/e2e/fixtures/linear-equation.png'
