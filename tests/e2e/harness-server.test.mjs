@@ -159,6 +159,544 @@ function sourceSlice(source, startMarker, endMarker) {
   return source.slice(start, end);
 }
 
+async function frontendRenderer() {
+  const source = await frontendSource();
+  const rendererSource = sourceSlice(
+    source,
+    '  function escapeHtml',
+    '  function plainMathFallbackString'
+  );
+  return new Function(
+    rendererSource +
+      '\nreturn {' +
+      'markdownToHtml' +
+      '};'
+  )();
+}
+
+function accidentalSchoolFence(marker = '```', language = '') {
+  return [
+    marker + language,
+    '### Drugi interval: \\(-2 \\le x < 1\\)',
+    '',
+    'Tada je \\(|x - 1| = 1 - x\\) i zato računamo razliku.',
+    '',
+    '\\[',
+    '(1 - x) - (x + 2) = -2x - 1',
+    '\\]',
+    '',
+    'Pošto proverom dobijamo jednakost, ovo je **važeće rešenje**.',
+    marker
+  ].join('\n');
+}
+
+test('renderer repairs accidental fenced and indented school explanations', async () => {
+  const { markdownToHtml } = await frontendRenderer();
+  const variants = [
+    accidentalSchoolFence(),
+    accidentalSchoolFence('~~~'),
+    accidentalSchoolFence('```', 'text'),
+    accidentalSchoolFence('```', 'latex'),
+    accidentalSchoolFence().replace(/\n```$/, '\n````'),
+    accidentalSchoolFence().replace(/\n/g, '\r\n'),
+    accidentalSchoolFence() +
+      '\n\n**Treći interval:** \\(x \\ge 1\\)\n\n' +
+      accidentalSchoolFence('~~~'),
+    accidentalSchoolFence()
+      .split('\n')
+      .slice(1, -1)
+      .map(line => line ? '    ' + line : '')
+      .join('\n'),
+    accidentalSchoolFence()
+      .split('\n')
+      .slice(1, -1)
+      .map(line => line ? '\t' + line : '')
+      .join('\n')
+  ];
+
+  for (const source of variants) {
+    const html = markdownToHtml(source, true);
+    assert.doesNotMatch(html, /<pre\b|<code\b|```|~~~/);
+    assert.match(html, /<h3>Drugi interval:/);
+    assert.match(html, /class="mathInlineRaw"/);
+    assert.match(html, /class="mathBlockRaw"/);
+    assert.match(html, /<strong>važeće rešenje<\/strong>/);
+    assert.match(html, /Pošto proverom/);
+  }
+
+  const cyrillic = [
+    '```',
+    '### Решење задатка',
+    'Тада добијамо исправну вредност.',
+    '\\[',
+    'x = 2',
+    '\\]',
+    'Дакле, провера једнакости важи и ово је **тачно решење**.',
+    '```'
+  ].join('\r\n');
+  const cyrillicHtml = markdownToHtml(cyrillic, true);
+  assert.doesNotMatch(cyrillicHtml, /<pre\b|<code\b|```/);
+  assert.match(cyrillicHtml, /<h3>Решење задатка/);
+  assert.match(cyrillicHtml, /class="mathBlockRaw"/);
+  assert.match(cyrillicHtml, /<strong>тачно решење<\/strong>/);
+});
+
+test('renderer repairs an unfinished streamed school fence deterministically', async () => {
+  const { markdownToHtml } = await frontendRenderer();
+  const completed = accidentalSchoolFence();
+  const unfinished = completed.split('\n').slice(0, -1).join('\n');
+
+  assert.match(markdownToHtml(unfinished, false), /<pre><code/);
+  assert.match(markdownToHtml(completed, false), /<pre><code/);
+  assert.equal(
+    markdownToHtml(unfinished, true),
+    markdownToHtml(completed, true)
+  );
+  assert.doesNotMatch(markdownToHtml(unfinished, true), /<pre\b|<code\b|```/);
+});
+
+test('renderer preserves genuine code and escapes hostile accidental prose', async () => {
+  const { markdownToHtml } = await frontendRenderer();
+  const javascript = [
+    '```javascript',
+    'const formula = "\\\\[x = 2\\\\]";',
+    'console.log(formula);',
+    '```'
+  ].join('\n');
+  const unlabeledCode = [
+    '```',
+    'function solve() {',
+    '  const formula = "\\\\[x = 2\\\\]";',
+    '  return formula;',
+    '}',
+    '```'
+  ].join('\n');
+  const indentedPython = [
+    '    formula = "\\\\[x = 2\\\\]"',
+    '    print(formula)'
+  ].join('\n');
+  const indentedAssignments = [
+    '    title = "**Važeće rešenje**"',
+    '    formula = "\\\\(x = 2\\\\)"',
+    '    note = "Tada proveravamo vrednost"'
+  ].join('\n');
+  const indentedBareLatex = [
+    '    formula = \\frac{1}{2}',
+    '    result = formula'
+  ].join('\n');
+  const cyrillicAssignments = [
+    '    наслов = "Важеће решење задатка"',
+    '    формула = "\\\\(x = 2\\\\)"',
+    '    напомена = "Тада провером добијамо вредност"'
+  ].join('\n');
+  const quotedAssignments = [
+    '    "наслов" = "Важеће решење задатка"',
+    '    \'formula\' = "\\\\(x = 2\\\\)"',
+    '    "note" = "Тада провером добијамо вредност"'
+  ].join('\n');
+  const json = [
+    '    {',
+    '      "formula": "\\\\[x = 2\\\\]",',
+    '      "valid": true',
+    '    }'
+  ].join('\n');
+  const yaml = [
+    '    title: "Važeće rešenje zadatka"',
+    '    formula: "\\\\(x = 2\\\\)"',
+    '    note: "Tada proverom dobijamo vrednost"'
+  ].join('\n');
+  const htmlSample = [
+    '    <section class="rešenje">',
+    '      <strong>Važeće rešenje zadatka</strong>',
+    '      <span data-formula="\\\\(x = 2\\\\)">Tada proverom dobijamo vrednost</span>',
+    '    </section>'
+  ].join('\n');
+  const cyrillicYaml = [
+    '    наслов: "Важеће решење задатка"',
+    '    формула: "\\\\(x = 2\\\\)"',
+    '    напомена: "Тада провером добијамо вредност"'
+  ].join('\n');
+  const quotedCyrillicYaml = [
+    '    "наслов": "Важеће решење задатка"',
+    '    "формула": "\\\\(x = 2\\\\)"',
+    '    \'напомена\': "Тада провером добијамо вредност"'
+  ].join('\n');
+  const yamlList = [
+    '    - title: "Važeće rešenje zadatka"',
+    '    - formula: "\\\\(x = 2\\\\)"',
+    '    - note: "Tada proverom dobijamo vrednost"'
+  ].join('\n');
+  const orderedListSource = [
+    '    1. Važeće rešenje zadatka',
+    '    2. Tada primenjujemo \\\\(x = 2\\\\)',
+    '    3. Dakle proverom dobijamo vrednost'
+  ].join('\n');
+
+  const javascriptHtml = markdownToHtml(javascript, true);
+  assert.match(javascriptHtml, /<pre><code data-lang="javascript">/);
+  assert.doesNotMatch(javascriptHtml, /math(?:Block|Inline)Raw/);
+  assert.match(javascriptHtml, /console\.log\(formula\);/);
+
+  const unfinishedJavascript = javascript.split('\n').slice(0, -1).join('\n');
+  assert.match(markdownToHtml(unfinishedJavascript, true), /<pre><code data-lang="javascript">/);
+
+  for (const source of [
+    unlabeledCode,
+    indentedPython,
+    indentedAssignments,
+    indentedBareLatex,
+    cyrillicAssignments,
+    quotedAssignments,
+    json,
+    yaml,
+    htmlSample,
+    cyrillicYaml,
+    quotedCyrillicYaml,
+    yamlList,
+    orderedListSource
+  ]) {
+    const html = markdownToHtml(source, true);
+    assert.match(html, /<pre><code/);
+    assert.doesNotMatch(html, /math(?:Block|Inline)Raw/);
+  }
+
+  const yamlHtml = markdownToHtml(yaml, true);
+  assert.equal(
+    yamlHtml,
+    '<pre><code data-lang="">title: &quot;Važeće rešenje zadatka&quot;\n' +
+      'formula: &quot;\\\\(x = 2\\\\)&quot;\n' +
+      'note: &quot;Tada proverom dobijamo vrednost&quot;</code></pre>'
+  );
+  const htmlSampleHtml = markdownToHtml(htmlSample, true);
+  assert.equal(
+    htmlSampleHtml,
+    '<pre><code data-lang="">&lt;section class=&quot;rešenje&quot;&gt;\n' +
+      '  &lt;strong&gt;Važeće rešenje zadatka&lt;/strong&gt;\n' +
+      '  &lt;span data-formula=&quot;\\\\(x = 2\\\\)&quot;&gt;Tada proverom dobijamo vrednost&lt;/span&gt;\n' +
+      '&lt;/section&gt;</code></pre>'
+  );
+  assert.equal(
+    markdownToHtml(cyrillicYaml, true),
+    '<pre><code data-lang="">наслов: &quot;Важеће решење задатка&quot;\n' +
+      'формула: &quot;\\\\(x = 2\\\\)&quot;\n' +
+      'напомена: &quot;Тада провером добијамо вредност&quot;</code></pre>'
+  );
+  assert.equal(
+    markdownToHtml(cyrillicAssignments, true),
+    '<pre><code data-lang="">наслов = &quot;Важеће решење задатка&quot;\n' +
+      'формула = &quot;\\\\(x = 2\\\\)&quot;\n' +
+      'напомена = &quot;Тада провером добијамо вредност&quot;</code></pre>'
+  );
+  assert.equal(
+    markdownToHtml(quotedAssignments, true),
+    '<pre><code data-lang="">&quot;наслов&quot; = &quot;Важеће решење задатка&quot;\n' +
+      "'formula' = &quot;\\\\(x = 2\\\\)&quot;\n" +
+      '&quot;note&quot; = &quot;Тада провером добијамо вредност&quot;</code></pre>'
+  );
+  assert.equal(
+    markdownToHtml(quotedCyrillicYaml, true),
+    '<pre><code data-lang="">&quot;наслов&quot;: &quot;Важеће решење задатка&quot;\n' +
+      '&quot;формула&quot;: &quot;\\\\(x = 2\\\\)&quot;\n' +
+      "'напомена': &quot;Тада провером добијамо вредност&quot;</code></pre>"
+  );
+  assert.equal(
+    markdownToHtml(yamlList, true),
+    '<pre><code data-lang="">- title: &quot;Važeće rešenje zadatka&quot;\n' +
+      '- formula: &quot;\\\\(x = 2\\\\)&quot;\n' +
+      '- note: &quot;Tada proverom dobijamo vrednost&quot;</code></pre>'
+  );
+  assert.equal(
+    markdownToHtml(orderedListSource, true),
+    '<pre><code data-lang="">1. Važeće rešenje zadatka\n' +
+      '2. Tada primenjujemo \\\\(x = 2\\\\)\n' +
+      '3. Dakle proverom dobijamo vrednost</code></pre>'
+  );
+
+  const nestedRenderedList = [
+    '- Prvi korak',
+    '    Kratko objašnjenje roditeljske stavke.',
+    '',
+    '    - Tada primeni \\(x = 2\\)',
+    '    - Dakle proveri vrednost',
+    '1. Drugi korak',
+    '    1. Tada proveri \\(x = 2\\)'
+  ].join('\n');
+  const nestedRenderedListHtml = markdownToHtml(nestedRenderedList, true);
+  assert.doesNotMatch(nestedRenderedListHtml, /<pre\b|<code\b/);
+  assert.equal(
+    (nestedRenderedListHtml.match(/class="mdListItem"/g) || []).length,
+    5
+  );
+  assert.equal(
+    (nestedRenderedListHtml.match(/class="mathInlineRaw"/g) || []).length,
+    2
+  );
+
+  const deepNestedRenderedList = [
+    '- L0',
+    '  nastavak nultog nivoa',
+    '    - L1',
+    '      nastavak prvog nivoa',
+    '        1. L2 \\(x = 2\\)'
+  ].join('\n');
+  const deepNestedRenderedListHtml = markdownToHtml(deepNestedRenderedList, true);
+  assert.doesNotMatch(deepNestedRenderedListHtml, /<pre\b|<code\b/);
+  assert.equal(
+    (deepNestedRenderedListHtml.match(/class="mdListItem"/g) || []).length,
+    3
+  );
+  assert.equal(
+    (deepNestedRenderedListHtml.match(/class="mathInlineRaw"/g) || []).length,
+    1
+  );
+
+  const genuineCodeInsideList = [
+    '- Parent',
+    '',
+    '      formula = "\\\\(x = 2\\\\)"',
+    '      print(formula)'
+  ].join('\n');
+  const genuineCodeInsideListHtml = markdownToHtml(genuineCodeInsideList, true);
+  assert.match(genuineCodeInsideListHtml, /<pre><code data-lang="">/);
+  assert.match(genuineCodeInsideListHtml, /formula = &quot;\\\\\(x = 2\\\\\)&quot;/);
+  assert.match(genuineCodeInsideListHtml, /print\(formula\)/);
+  assert.doesNotMatch(genuineCodeInsideListHtml, /math(?:Block|Inline)Raw/);
+
+  const bulletCodeInsideList = [
+    '- Parent',
+    '',
+    '      - title: "Važeće rešenje zadatka"',
+    '      - formula: "\\\\(x = 2\\\\)"',
+    '      - note: "Tada proverom dobijamo vrednost"'
+  ].join('\n');
+  assert.equal(
+    markdownToHtml(bulletCodeInsideList, true),
+    '<div class="mdListItem" style="margin-left:0px"><span class="mdListMarker">•</span><div class="mdListBody">Parent</div></div>' +
+      '<pre><code data-lang="">- title: &quot;Važeće rešenje zadatka&quot;\n' +
+      '- formula: &quot;\\\\(x = 2\\\\)&quot;\n' +
+      '- note: &quot;Tada proverom dobijamo vrednost&quot;</code></pre>'
+  );
+
+  const orderedCodeInsideList = [
+    '1. Parent',
+    '',
+    '       1. Važeće rešenje zadatka',
+    '       2. Tada primenjujemo \\\\(x = 2\\\\)',
+    '       3. Dakle proverom dobijamo vrednost'
+  ].join('\n');
+  assert.equal(
+    markdownToHtml(orderedCodeInsideList, true),
+    '<div class="mdListItem" style="margin-left:0px"><span class="mdListMarker">1.</span><div class="mdListBody">Parent</div></div>' +
+      '<pre><code data-lang="">1. Važeće rešenje zadatka\n' +
+      '2. Tada primenjujemo \\\\(x = 2\\\\)\n' +
+      '3. Dakle proverom dobijamo vrednost</code></pre>'
+  );
+
+  const bulletCodeAfterClosedList = [
+    '- Parent',
+    '',
+    '',
+    '    - title: "Važeće rešenje zadatka"',
+    '    - formula: "\\\\(x = 2\\\\)"',
+    '    - note: "Tada proverom dobijamo vrednost"'
+  ].join('\n');
+  assert.equal(
+    markdownToHtml(bulletCodeAfterClosedList, true),
+    '<div class="mdListItem" style="margin-left:0px"><span class="mdListMarker">•</span><div class="mdListBody">Parent</div></div>' +
+      '<pre><code data-lang="">- title: &quot;Važeće rešenje zadatka&quot;\n' +
+      '- formula: &quot;\\\\(x = 2\\\\)&quot;\n' +
+      '- note: &quot;Tada proverom dobijamo vrednost&quot;</code></pre>'
+  );
+
+  const orderedCodeAfterClosedList = [
+    '1. Parent',
+    '',
+    '',
+    '    1. Važeće rešenje zadatka',
+    '    2. Tada primenjujemo \\\\(x = 2\\\\)',
+    '    3. Dakle proverom dobijamo vrednost'
+  ].join('\n');
+  assert.equal(
+    markdownToHtml(orderedCodeAfterClosedList, true),
+    '<div class="mdListItem" style="margin-left:0px"><span class="mdListMarker">1.</span><div class="mdListBody">Parent</div></div>' +
+      '<pre><code data-lang="">1. Važeće rešenje zadatka\n' +
+      '2. Tada primenjujemo \\\\(x = 2\\\\)\n' +
+      '3. Dakle proverom dobijamo vrednost</code></pre>'
+  );
+
+  const fencedJavascriptInsideList = [
+    '- Primer koda:',
+    '    ```javascript',
+    '    const formula = "\\\\(x = 2\\\\)";',
+    '    console.log(formula);',
+    '    ```'
+  ].join('\n');
+  const fencedJavascriptInsideListHtml = markdownToHtml(
+    fencedJavascriptInsideList,
+    true
+  );
+  assert.match(
+    fencedJavascriptInsideListHtml,
+    /<pre><code data-lang="javascript">/
+  );
+  assert.match(fencedJavascriptInsideListHtml, /const formula = &quot;/);
+  assert.match(fencedJavascriptInsideListHtml, /console\.log\(formula\);/);
+  assert.doesNotMatch(
+    fencedJavascriptInsideListHtml,
+    /math(?:Block|Inline)Raw|```/
+  );
+
+  const deepFencedCodeInsideList = [
+    '- L0',
+    '    - L1',
+    '        ```python',
+    '        formula = "\\\\(x = 2\\\\)"',
+    '        print(formula)',
+    '        ```'
+  ].join('\n');
+  const deepFencedCodeInsideListHtml = markdownToHtml(
+    deepFencedCodeInsideList,
+    true
+  );
+  assert.equal(
+    (deepFencedCodeInsideListHtml.match(/class="mdListItem"/g) || []).length,
+    2
+  );
+  assert.match(deepFencedCodeInsideListHtml, /<pre><code data-lang="python">/);
+  assert.match(deepFencedCodeInsideListHtml, /print\(formula\)/);
+  assert.doesNotMatch(
+    deepFencedCodeInsideListHtml,
+    /math(?:Block|Inline)Raw|```/
+  );
+
+  const dedentedFenceInAncestorList = [
+    '- Root',
+    '    - Child',
+    '     ```javascript',
+    '     const formula = "\\\\(x = 2\\\\)";',
+    '     console.log(formula);',
+    '     ```'
+  ].join('\n');
+  const dedentedFenceInAncestorListHtml = markdownToHtml(
+    dedentedFenceInAncestorList,
+    true
+  );
+  assert.equal(
+    (dedentedFenceInAncestorListHtml.match(/class="mdListItem"/g) || []).length,
+    2
+  );
+  assert.match(
+    dedentedFenceInAncestorListHtml,
+    /<pre><code data-lang="javascript">/
+  );
+  assert.match(dedentedFenceInAncestorListHtml, /console\.log\(formula\);/);
+  assert.doesNotMatch(
+    dedentedFenceInAncestorListHtml,
+    /math(?:Block|Inline)Raw|```/
+  );
+
+  const longNestedList = [
+    '- Roditeljska stavka',
+    ...Array.from(
+      {length: 4000},
+      (_, index) => `    - Korak ${index + 1}: \\(x = ${index + 1}\\)`
+    )
+  ].join('\n');
+  const longListStartedAt = performance.now();
+  const longNestedListHtml = markdownToHtml(longNestedList, true);
+  const longListDuration = performance.now() - longListStartedAt;
+  assert.equal(
+    (longNestedListHtml.match(/class="mdListItem"/g) || []).length,
+    4001
+  );
+  assert.equal(
+    (longNestedListHtml.match(/class="mathInlineRaw"/g) || []).length,
+    4000
+  );
+  assert.ok(
+    longListDuration < 1200,
+    `long nested list must render linearly; took ${longListDuration.toFixed(1)}ms`
+  );
+
+  const inlineStressSource = Array.from(
+    {length: 4000},
+    (_, index) => `<sup>${index + 1}</sup> \\*`
+  ).join(' ');
+  const inlineStressStartedAt = performance.now();
+  const inlineStressHtml = markdownToHtml(inlineStressSource, true);
+  const inlineStressDuration = performance.now() - inlineStressStartedAt;
+  assert.equal((inlineStressHtml.match(/<sup>/g) || []).length, 4000);
+  assert.equal((inlineStressHtml.match(/<\/sup>/g) || []).length, 4000);
+  assert.doesNotMatch(inlineStressHtml, /@@(?:SAFEHTML|ESC)\d+@@/);
+  assert.ok(
+    inlineStressDuration < 700,
+    `inline placeholders must render linearly; took ${inlineStressDuration.toFixed(1)}ms`
+  );
+
+  const pureLatex = ['```latex', '\\frac{2}{5} = 0{,}4', '```'].join('\n');
+  const latexHtml = markdownToHtml(pureLatex, true);
+  assert.doesNotMatch(latexHtml, /<pre\b|<code\b/);
+  assert.match(latexHtml, /class="mathBlockRaw"/);
+
+  const nestedFence = [
+    '````markdown',
+    'Primer sintakse sa pravim unutrašnjim kodom i formulom \\(x = 2\\):',
+    '```text',
+    '    title = "**Važeće rešenje**"',
+    '    formula = "\\\\(x = 2\\\\)"',
+    '```',
+    '````'
+  ].join('\n');
+  const nestedFenceHtml = markdownToHtml(nestedFence, true);
+  assert.match(nestedFenceHtml, /<pre><code data-lang="markdown">/);
+  assert.match(nestedFenceHtml, /    title = &quot;\*\*Važeće rešenje\*\*&quot;/);
+  assert.doesNotMatch(nestedFenceHtml, /math(?:Block|Inline)Raw/);
+
+  const longerJavascriptCloser = javascript.replace(/\n```$/, '\n````');
+  const longerCloserHtml = markdownToHtml(longerJavascriptCloser, true);
+  assert.match(longerCloserHtml, /<pre><code data-lang="javascript">/);
+  assert.match(longerCloserHtml, /console\.log\(formula\);/);
+
+  const proseOnly = [
+    '```text',
+    'Ovo je samo citirani tekst bez matematičkih delimitera.',
+    'I zato nije bezbedno nagađati da fence sigurno predstavlja grešku.',
+    '```'
+  ].join('\n');
+  assert.match(markdownToHtml(proseOnly, true), /<pre><code data-lang="text">/);
+
+  const literalMarkdown = [
+    '```markdown',
+    '### Uputstvo',
+    '**Tada primeni formulu:** \\(x = 2\\)',
+    'Ovo je doslovni Markdown primer za školski zadatak.',
+    '```'
+  ].join('\n');
+  assert.match(markdownToHtml(literalMarkdown, true), /<pre><code data-lang="markdown">/);
+
+  const hostile = accidentalSchoolFence()
+    .replace(
+      'Pošto proverom',
+      '<script>globalThis.__rendererPwned = true<\/script> ' +
+        '<img src=x onerror="globalThis.__rendererPwned = true"> ' +
+        '[klik](javascript:alert(1)) Pošto proverom'
+    );
+  const hostileHtml = markdownToHtml(hostile, true);
+  assert.doesNotMatch(hostileHtml, /<script\b|<img\b|href="javascript:/i);
+  assert.match(hostileHtml, /&lt;script&gt;/);
+  assert.match(hostileHtml, /&lt;img src=x onerror=&quot;/);
+
+  const hostileLanguage = [
+    '```"><img src=x onerror=alert(1)>',
+    'plain output',
+    '```'
+  ].join('\n');
+  const hostileLanguageHtml = markdownToHtml(hostileLanguage, true);
+  assert.match(hostileLanguageHtml, /<pre><code data-lang=/);
+  assert.doesNotMatch(hostileLanguageHtml, /<img\b/);
+  assert.match(hostileLanguageHtml, /&quot;&gt;&lt;img/);
+});
+
 test('local API file parser accepts 1-4 safe lines and rejects invalid input', async () => {
   const source = await frontendSource();
   const parserSource = sourceSlice(

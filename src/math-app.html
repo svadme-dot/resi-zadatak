@@ -32,7 +32,8 @@ window.MathJax = {
       '[tex]/mathtools',
       '[tex]/cases',
       '[tex]/cancel',
-      '[tex]/gensymb'
+      '[tex]/gensymb',
+      'ui/safe'
     ]
   },
   tex: {
@@ -52,12 +53,31 @@ window.MathJax = {
   svg: {
     fontCache: 'global'
   },
+  options: {
+    // Odgovor servisa je nepoverljiv ulaz: formule ne smeju praviti linkove,
+    // CSS klase/ID-jeve niti stilove koji mogu menjati aplikaciju.
+    safeOptions: {
+      allow: {
+        URLs: 'none',
+        classes: 'none',
+        cssIDs: 'none',
+        styles: 'none'
+      },
+      safeProtocols: {
+        http: false,
+        https: false,
+        file: false,
+        javascript: false,
+        data: false
+      }
+    }
+  },
   startup: {
     typeset: false
   }
 };
 </script>
-<script defer src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-svg.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/mathjax@4.1.3/tex-svg.js"></script>
 
 <style>
   :root{
@@ -4241,6 +4261,372 @@ window.MathJax = {
     return count;
   }
 
+  function normalizedFenceLanguage(rawLanguage) {
+    let language = String(rawLanguage ?? "").trim().toLowerCase();
+    if (language.startsWith("{.")) language = language.slice(2);
+    language = language.replace(/^[.#]+/, "").split(/[\s,}]+/, 1)[0];
+    return language;
+  }
+
+  function looksLikeAccidentalSchoolCodeBlock(rawLanguage, rawBody) {
+    const language = normalizedFenceLanguage(rawLanguage);
+    const neutralLanguages = new Set([
+      "", "text", "txt", "plain", "plaintext",
+      "latex", "tex", "math"
+    ]);
+
+    // Svaki eksplicitni programski ili nepoznati format ostaje pravi code block.
+    if (!neutralLanguages.has(language)) return false;
+
+    const body = String(rawBody ?? "").replace(/\r\n?/g, "\n");
+    const trimmed = body.trim();
+    if (trimmed.length < 16) return false;
+    if (/^\s*(?:```+|~~~+)/m.test(trimmed)) return false;
+
+    const lines = trimmed.split("\n");
+    const nonemptyLines = lines.filter(line => line.trim()).length;
+    if (nonemptyLines < 3) return false;
+
+    // Programski signali se traže samo izvan eksplicitno omeđene matematike.
+    const codeProbe = trimmed
+      .replace(/\\\[[\s\S]*?\\\]/g, "")
+      .replace(/\\\([\s\S]*?\\\)/g, "")
+      .replace(/(?<!\\)\$\$[\s\S]*?(?<!\\)\$\$/g, "");
+
+    const codePatterns = [
+      /(?:^|\n)\s*(?:#!|\/\/|\/\*|\*\/|<!--|-->|#\s*(?:include|define)\b)/m,
+      /(?:^|\n)\s*(?:(?:const|let|var)\s+[A-Za-z_$]|(?:async\s+)?function\b|class\s+\w+|def\s+\w+|(?:from\s+\S+\s+)?import\s+\S+|return\b|package\s+\w+|namespace\s+\w+)/m,
+      /(?:^|\n)\s*(?:if|for|while|switch|catch)\s*\([^\n]*\)\s*\{?/m,
+      /(?:^|\n)\s*(?:SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b/im,
+      /(?:^|\n)\s*(?:npm|pnpm|yarn|git|curl|wget|sudo|python|node|powershell)\s+\S+/im,
+      /\b(?:console\.(?:log|error|warn)|print)\s*\(|=>|;\s*(?:\n|$)/m,
+      /(?:^|\n)\s*(?:"[^"\n]+"|'[^'\n]+'|[$_\p{L}][$_\p{L}\p{N}.\[\]'"-]*)\s*=\s*\S+/mu
+    ];
+    const looksLikeJson =
+      /^\s*[\[{][\s\S]*[\]}]\s*$/.test(trimmed) &&
+      /"[^"\n]+"\s*:/.test(trimmed);
+    const yamlKeyLines = codeProbe.match(
+      /(?:^|\n)\s*(?:-\s+)?(?:"[^"\n]+"|'[^'\n]+'|[\p{L}_][\p{L}\p{N}_.-]*)\s*:\s*\S+/gu
+    ) || [];
+    const looksLikeYaml = yamlKeyLines.length >= 2;
+    const looksLikeMarkup = /(?:^|\n)\s*<\/?[A-Za-z][^>\n]*>/m.test(codeProbe);
+    const nonemptyBodyLines = trimmed.split("\n").filter(line => line.trim());
+    const looksLikeListSource =
+      nonemptyBodyLines.length >= 2 &&
+      nonemptyBodyLines.every(line => /^\s*(?:[-+*]|\d+[.)])\s+\S/.test(line));
+    if (
+      looksLikeJson ||
+      looksLikeYaml ||
+      looksLikeMarkup ||
+      looksLikeListSource ||
+      codePatterns.some(pattern => pattern.test(codeProbe))
+    ) return false;
+
+    const schoolLetterClass = "A-Za-zČĆŽŠĐčćžšđА-Яа-яЁёЂђЈјЉљЊњЋћЏџ";
+    const words = trimmed.match(
+      new RegExp(`[${schoolLetterClass}]{2,}`, "g")
+    ) || [];
+    const proseLines = lines.filter(line =>
+      (line.match(new RegExp(`[${schoolLetterClass}]{2,}`, "g")) || []).length >= 3
+    ).length;
+    const hasBalancedExplicitMath =
+      /\\\[[\s\S]*?\\\]/.test(trimmed) ||
+      /\\\([\s\S]*?\\\)/.test(trimmed) ||
+      /(?<!\\)\$\$[\s\S]*?(?<!\\)\$\$/.test(trimmed);
+    const hasPresentationMarkdown = /(?:^|\n)\s*(?:#{1,6}\s+|[-+*]\s+|\d+[.)]\s+)|\*\*[^*\n]+\*\*/m.test(trimmed);
+    const schoolExpositionWords =
+      "tada|pošto|posto|dakle|odnosno|rešenje|resenje|jednačina|jednacina|" +
+      "interval|dobijamo|vidimo|važi|vazi|konačno|konacno|prvi|drugi|treći|" +
+      "treci|zadatak|leva|desna|strana|razlika|računamo|racunamo|sledi|uslov|" +
+      "provera|proverom|jednakost|rešavamo|resavamo|vrednost|" +
+      "тада|пошто|дакле|односно|решење|једначина|интервал|добијамо|видимо|" +
+      "важи|коначно|први|други|трећи|задатак|лева|десна|страна|разлика|" +
+      "рачунамо|следи|услов|провера|провером|једнакост|решавамо|вредност";
+    const hasSchoolExposition = new RegExp(
+      `(?:^|[^${schoolLetterClass}])(?:${schoolExpositionWords})(?=$|[^${schoolLetterClass}])`,
+      "i"
+    ).test(trimmed);
+
+    if (!hasBalancedExplicitMath || !hasSchoolExposition || words.length < 6) return false;
+    return (
+      proseLines >= 2 ||
+      (hasPresentationMarkdown && proseLines >= 1) ||
+      (proseLines >= 1 && words.length >= 12)
+    );
+  }
+
+  function dedentSchoolExplanationBlock(rawBody) {
+    const lines = String(rawBody ?? "").replace(/\r\n?/g, "\n").split("\n");
+    while (lines.length && !lines[0].trim()) lines.shift();
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+
+    const indents = lines
+      .filter(line => line.trim())
+      .map(line => (line.match(/^[ \t]*/) || [""])[0].replace(/\t/g, "    ").length);
+    const commonIndent = indents.length ? Math.min(...indents) : 0;
+    if (!commonIndent) return lines.join("\n");
+
+    return lines.map(line => {
+      let remaining = commonIndent;
+      let index = 0;
+      while (remaining > 0 && index < line.length) {
+        if (line[index] === "\t") {
+          remaining -= 4;
+          index++;
+        } else if (line[index] === " ") {
+          remaining--;
+          index++;
+        } else {
+          break;
+        }
+      }
+      return line.slice(index);
+    }).join("\n");
+  }
+
+  function stripMarkdownIndent(line, requiredWidth = 4) {
+    const s = String(line ?? "");
+    let width = 0;
+    let index = 0;
+    while (index < s.length && width < requiredWidth) {
+      if (s[index] === "\t") {
+        width += 4;
+        index++;
+      } else if (s[index] === " ") {
+        width++;
+        index++;
+      } else {
+        break;
+      }
+    }
+    return width >= requiredWidth ? s.slice(index) : null;
+  }
+
+  function stripOneMarkdownIndent(line) {
+    return stripMarkdownIndent(line, 4);
+  }
+
+  function markdownIndentWidth(line) {
+    const indent = String(line ?? "").match(/^[ \t]*/)?.[0] || "";
+    return indent.replace(/\t/g, "    ").length;
+  }
+
+  function markdownListMarkerInfo(line) {
+    const match = String(line ?? "").match(
+      /^([ \t]*)([-+*]|\d+[.)])([ \t]+)\S/
+    );
+    if (!match) return null;
+    return {
+      indent: markdownIndentWidth(match[1]),
+      contentIndent:
+        markdownIndentWidth(match[1]) +
+        match[2].length +
+        markdownIndentWidth(match[3])
+    };
+  }
+
+  function markdownListContext(lines) {
+    const nested = new Array(lines.length).fill(false);
+    const continuation = new Array(lines.length).fill(false);
+    const codeIndents = new Array(lines.length).fill(0);
+    const containerIndents = new Array(lines.length).fill(0);
+    const activeListIndents = [];
+    let activeFence = null;
+    let consecutiveBlankLines = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = String(lines[i] ?? "");
+      if (activeFence) {
+        if (markdownFenceCloses(line, activeFence)) activeFence = null;
+        continue;
+      }
+      if (!line.trim()) {
+        consecutiveBlankLines++;
+        if (consecutiveBlankLines >= 2) activeListIndents.length = 0;
+        continue;
+      }
+      consecutiveBlankLines = 0;
+
+      const indent = markdownIndentWidth(line);
+      while (
+        activeListIndents.length &&
+        activeListIndents[activeListIndents.length - 1].indent >= indent
+      ) activeListIndents.pop();
+      while (
+        activeListIndents.length &&
+        indent < activeListIndents[activeListIndents.length - 1].contentIndent
+      ) activeListIndents.pop();
+
+      const possibleParent = activeListIndents[activeListIndents.length - 1];
+      const containerIndent =
+        possibleParent && indent >= possibleParent.contentIndent
+          ? possibleParent.contentIndent
+          : 0;
+      containerIndents[i] = containerIndent;
+      const opening = markdownFenceOpening(line, containerIndent);
+      if (opening) {
+        activeFence = opening;
+        continue;
+      }
+
+      const followsBlank = i > 0 && !String(lines[i - 1] ?? "").trim();
+      if (
+        possibleParent &&
+        followsBlank &&
+        indent >= possibleParent.contentIndent + 4
+      ) {
+        codeIndents[i] = possibleParent.contentIndent + 4;
+        continue;
+      }
+
+      const marker = markdownListMarkerInfo(line);
+      if (marker) {
+        nested[i] = activeListIndents.length > 0;
+        activeListIndents.push(marker);
+        continue;
+      }
+
+      const parent = activeListIndents[activeListIndents.length - 1];
+      if (!parent) continue;
+      continuation[i] = true;
+    }
+    return {nested, continuation, codeIndents, containerIndents};
+  }
+
+  function markdownFenceOpening(line, containerIndent = 0) {
+    const relative = stripMarkdownIndent(line, containerIndent);
+    if (relative === null) return null;
+    const match = relative.match(/^( {0,3})(`{3,}|~{3,})([^\n]*)$/);
+    if (!match) return null;
+
+    const marker = match[2];
+    const info = match[3].trim();
+    if (marker[0] === "`" && info.includes("`")) return null;
+
+    return {
+      char: marker[0],
+      length: marker.length,
+      indent: containerIndent + match[1].length,
+      containerIndent,
+      info
+    };
+  }
+
+  function markdownFenceCloses(line, opening) {
+    const relative = stripMarkdownIndent(line, opening?.containerIndent || 0);
+    if (relative === null) return false;
+    const match = relative.match(/^( {0,3})(`{3,}|~{3,})[ \t]*$/);
+    if (!match || !opening) return false;
+    return match[2][0] === opening.char && match[2].length >= opening.length;
+  }
+
+  function removeFenceIndent(line, indent) {
+    const source = String(line ?? "");
+    let width = 0;
+    let index = 0;
+    while (index < source.length && width < indent) {
+      if (source[index] === "\t") {
+        width += 4;
+        index++;
+      } else if (source[index] === " ") {
+        width++;
+        index++;
+      } else {
+        break;
+      }
+    }
+    return source.slice(index);
+  }
+
+  function storeMarkdownCodeBlock(codeBlocks, language, body) {
+    const index = codeBlocks.length;
+    codeBlocks.push({
+      lang: String(language || "").trim(),
+      code: String(body || "").replace(/\n$/, "")
+    });
+    return `@@CODEB${index}@@`;
+  }
+
+  function extractMarkdownCodeBlocksForRender(source, codeBlocks, final = false) {
+    const lines = String(source ?? "").split("\n");
+    const listContext = markdownListContext(lines);
+    const output = [];
+
+    for (let i = 0; i < lines.length;) {
+      const opening = markdownFenceOpening(
+        lines[i],
+        listContext.containerIndents[i] || 0
+      );
+      if (opening) {
+        const bodyLines = [];
+        let closed = false;
+        i++;
+
+        while (i < lines.length) {
+          if (markdownFenceCloses(lines[i], opening)) {
+            closed = true;
+            i++;
+            break;
+          }
+          bodyLines.push(removeFenceIndent(lines[i], opening.indent));
+          i++;
+        }
+
+        const body = bodyLines.join("\n");
+        const accidental = looksLikeAccidentalSchoolCodeBlock(opening.info, body);
+        const language = normalizedFenceLanguage(opening.info);
+        const mathFence = language === "latex" || language === "tex" || language === "math";
+
+        if (final && accidental) {
+          output.push(...dedentSchoolExplanationBlock(body).split("\n"));
+          output.push("");
+        } else if (!accidental && mathFence && (closed || final)) {
+          output.push("\\[", String(body).trim(), "\\]", "");
+        } else {
+          output.push(storeMarkdownCodeBlock(codeBlocks, opening.info, body));
+        }
+        continue;
+      }
+
+      const firstIndentedLine = stripOneMarkdownIndent(lines[i]);
+      if (
+        firstIndentedLine !== null &&
+        firstIndentedLine.trim() &&
+        !listContext.nested[i] &&
+        !listContext.continuation[i]
+      ) {
+        const requiredIndent = listContext.codeIndents[i] || 4;
+        const bodyLines = [];
+        while (i < lines.length) {
+          const candidate = lines[i];
+          const stripped = stripMarkdownIndent(candidate, requiredIndent);
+          if (!candidate.trim()) {
+            bodyLines.push("");
+            i++;
+            continue;
+          }
+          if (stripped === null) break;
+          bodyLines.push(stripped);
+          i++;
+        }
+
+        const body = bodyLines.join("\n");
+        if (final && looksLikeAccidentalSchoolCodeBlock("", body)) {
+          output.push(...dedentSchoolExplanationBlock(body).split("\n"));
+          output.push("");
+        } else {
+          output.push(storeMarkdownCodeBlock(codeBlocks, "", body));
+        }
+        continue;
+      }
+
+      output.push(lines[i]);
+      i++;
+    }
+
+    return output.join("\n");
+  }
+
   function balanceMathDelimitersForRender(source) {
     let s = String(source ?? "");
 
@@ -4278,21 +4664,9 @@ window.MathJax = {
   }
 
   function normalizeSchoolMathSource(source) {
+    // Block i inline kod su već zamenjeni placeholder-ima, pa matematika
+    // nikada ne menja doslovan sadržaj pravog programskog primera.
     let s = balanceMathDelimitersForRender(source);
-
-    // Tokom streaminga zatvori nezavršen Markdown code fence samo u kopiji
-    // za prikaz, da korisnik ne gleda sirove ``` / ~~~ markere.
-    const fenceLines = s.match(/^\s*(```+|~~~+)/gm) || [];
-    if (fenceLines.length % 2 === 1) {
-      const lastFence = fenceLines[fenceLines.length - 1].trim();
-      s += `\n${lastFence.startsWith("~") ? "~~~" : "```"}`;
-    }
-
-    // Servis ponekad stavi čistu formulu u latex/tex/math code fence.
-    s = s.replace(
-      /(?:```|~~~)(?:latex|tex|math)\s*\n([\s\S]*?)(?:```|~~~)/gi,
-      (_, body) => `\n\\[\n${String(body).trim()}\n\\]\n`
-    );
 
     // Širi spisak standardnih školskih TeX environment-a.
     const envRx = /(^|\n)([ \t]*\\begin\{(aligned|alignedat|gathered|split|cases|matrix|pmatrix|bmatrix|vmatrix|Vmatrix|smallmatrix|array|align\*?|gather\*?|equation\*?)\}[\s\S]*?\\end\{\3\}[ \t]*)(?=\n|$)/g;
@@ -4635,25 +5009,38 @@ window.MathJax = {
     // Footnote-like marker [^1] -> diskretan superscript umesto sirove sintakse.
     s = s.replace(/\[\^([^\]]+)\]/g, '<span class="mdFootnote">[$1]</span>');
 
-    // Vrati dozvoljeni safe HTML.
-    safeHtml.forEach((tag, i) => {
-      s = s.replaceAll(`@@SAFEHTML${i}@@`, tag);
+    // Vrati dozvoljeni safe HTML jednim prolazom i fail-closed indeksom.
+    s = s.replace(/@@SAFEHTML(\d+)@@/g, (_, rawIndex) => {
+      const tag = safeHtml[Number(rawIndex)];
+      return tag === undefined ? "" : tag;
     });
 
-    // Vrati escaped Markdown znakove kao običan tekst.
-    escaped.forEach((ch, i) => {
-      s = s.replaceAll(`@@ESC${i}@@`, escapeHtml(ch));
+    // Vrati escaped Markdown znakove takođe jednim prolazom.
+    s = s.replace(/@@ESC(\d+)@@/g, (_, rawIndex) => {
+      const ch = escaped[Number(rawIndex)];
+      return ch === undefined ? "" : escapeHtml(ch);
     });
 
     return s;
   }
 
-  function markdownToHtml(markdown) {
+  function markdownToHtml(markdown, final = false) {
     if (!markdown) return "";
 
-    let text = normalizeSchoolMathSource(
-      String(markdown).replace(/\r\n?/g, "\n")
-    );
+    let text = String(markdown).replace(/\r\n?/g, "\n");
+
+    // 1) Jedan linearni parser zaključava fenced i indented code pre svih
+    // math normalizacija. Samo završeni prikaz sme da popravi očiglednu grešku.
+    const codeBlocks = [];
+    text = extractMarkdownCodeBlocksForRender(text, codeBlocks, final);
+
+    // 2) Zaključaj inline code pre math normalizacije.
+    const inlineCodes = [];
+    text = text.replace(/(`+)([^\n]*?)\1/g, (_, ticks, code) => {
+      const index = inlineCodes.length;
+      inlineCodes.push(String(code).trim());
+      return `@@CODEI${index}@@`;
+    });
 
     // Reference link definicije: [id]: https://...
     const references = {};
@@ -4663,31 +5050,14 @@ window.MathJax = {
         return "";
       });
 
-    // 1) Fenced code: ``` ili ~~~, proizvoljan jezik.
-    const codeBlocks = [];
-    text = text.replace(/^(\s*)(```+|~~~+)([^\n]*)\n([\s\S]*?)^\s*\2\s*$/gm,
-      (_, indent, fence, lang, code) => {
-        const index = codeBlocks.length;
-        codeBlocks.push({
-          lang: String(lang || "").trim(),
-          code: String(code || "").replace(/\n$/, "")
-        });
-        return `\n@@CODEB${index}@@\n`;
-      });
+    // 3) Normalizuj samo sadržaj koji nije pravi kod.
+    text = normalizeSchoolMathSource(text);
 
-    // 2) Inline code.
-    const inlineCodes = [];
-    text = text.replace(/(`+)([^\n]*?)\1/g, (_, ticks, code) => {
-      const index = inlineCodes.length;
-      inlineCodes.push(String(code).trim());
-      return `@@CODEI${index}@@`;
-    });
-
-    // 3) Zaključaj matematiku pre Markdown-a.
+    // 4) Zaključaj matematiku pre Markdown-a.
     const protectedMath = protectMath(text);
     text = protectedMath.text;
 
-    // 4) Popravi bare-LaTeX izvan placeholder-a.
+    // 5) Popravi bare-LaTeX izvan placeholder-a.
     text = repairBareLatexOutsideMath(text);
 
     const lines = text.split("\n");
@@ -4738,18 +5108,6 @@ window.MathJax = {
         if (item) {
           html += `<pre><code data-lang="${escapeHtml(item.lang)}">${escapeHtml(item.code)}</code></pre>`;
         }
-        continue;
-      }
-
-      // Indented code (4+ spaces), ali ne ako izgleda kao lista.
-      if (/^ {4,}\S/.test(line) && !/^\s*(?:[-+*]|\d+[.)])\s+/.test(line)) {
-        flushParagraph();
-        const block = [line.slice(4)];
-        while (i + 1 < lines.length && (/^ {4,}/.test(lines[i + 1]) || !lines[i + 1].trim())) {
-          i++;
-          block.push(lines[i].startsWith("    ") ? lines[i].slice(4) : "");
-        }
-        html += `<pre><code>${escapeHtml(block.join("\n"))}</code></pre>`;
         continue;
       }
 
@@ -4868,16 +5226,18 @@ window.MathJax = {
 
     flushParagraph();
 
-    // Vrati inline code.
-    inlineCodes.forEach((code, i) => {
-      html = html.replaceAll(`@@CODEI${i}@@`, `<code>${escapeHtml(code)}</code>`);
+    // Vrati inline code jednim prolazom, uz fail-closed proveru indeksa.
+    html = html.replace(/@@CODEI(\d+)@@/g, (_, rawIndex) => {
+      const code = inlineCodes[Number(rawIndex)];
+      return code === undefined ? "" : `<code>${escapeHtml(code)}</code>`;
     });
 
-    // Vrati matematiku tek kada je Markdown gotov.
-    protectedMath.maths.forEach((item, i) => {
-      const token = `@@MATH${item.block ? "B" : "I"}${i}@@`;
+    // Vrati matematiku tek kada je Markdown gotov, takođe jednim prolazom.
+    html = html.replace(/@@MATH([BI])(\d+)@@/g, (_, kind, rawIndex) => {
+      const item = protectedMath.maths[Number(rawIndex)];
+      if (!item || (kind === "B") !== Boolean(item.block)) return "";
       const cls = item.block ? "mathBlockRaw" : "mathInlineRaw";
-      html = html.replaceAll(token, `<span class="${cls}">${escapeHtml(item.raw)}</span>`);
+      return `<span class="${cls}">${escapeHtml(item.raw)}</span>`;
     });
 
     // Ako placeholder ostane zbog ekstremno polomljenog streama, ne pokazuj ga.
@@ -5072,7 +5432,7 @@ window.MathJax = {
 
   function renderModelContent(container, text, final = false) {
     if (!container) return;
-    container.innerHTML = markdownToHtml(sanitizeServiceMessage(text));
+    container.innerHTML = markdownToHtml(sanitizeServiceMessage(text), final);
     cleanupRenderedMarkdown(container);
     scheduleMath(container, final);
   }

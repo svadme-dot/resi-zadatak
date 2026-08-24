@@ -330,8 +330,46 @@ Assert-True ($source -match 'el\("sourceTextOnly"\)\.addEventListener\("click",\
   "nastavak bez fotografije mora zadržati normalan fokus tekstualnog unosa"
 Assert-True ($source -match 'role\.textContent\s*=\s*"AI asistent"') `
   "odgovor mora imati neutralnu korisničku oznaku"
-Assert-True ($source -match 'markdownToHtml\(sanitizeServiceMessage\(text\)\)') `
+Assert-True ($source -match 'markdownToHtml\(sanitizeServiceMessage\(text\),\s*final\)') `
   "svaki prikaz serverskog odgovora mora neutralisati naziv provajdera/modela"
+Assert-True ($source -match 'function\s+extractMarkdownCodeBlocksForRender\s*\([^)]*final\s*=\s*false') `
+  "renderer mora imati jedan linearni parser za fenced i uvučeni kod"
+Assert-True ($source -match 'function\s+markdownListContext[\s\S]{0,1400}activeListIndents[\s\S]{0,1400}continuation\[i\]') `
+  "ugnježdene liste moraju koristiti linearno stanje umesto backward skeniranja"
+Assert-True ($source -match 'extractMarkdownCodeBlocksForRender[\s\S]{0,350}listContext\s*=\s*markdownListContext\(lines\)[\s\S]{0,2800}!listContext\.nested\[i\][\s\S]{0,120}!listContext\.continuation\[i\]') `
+  "parser koda mora koristiti unapred izračunati list kontekst u O(1)"
+Assert-True ($source -notmatch 'for\s*\([^)]*=\s*index\s*-\s*1[^)]*;[^)]*>=\s*0') `
+  "renderer ne sme vraćati skener unazad za svaku list stavku"
+Assert-True ($source -match 'html\s*=\s*html\.replace\(/@@CODEI\(\\d\+\)@@/g[\s\S]{0,500}html\s*=\s*html\.replace\(/@@MATH\(\[BI\]\)\(\\d\+\)@@/g') `
+  "inline code i matematika moraju se vratiti jednim linearnim prolazom"
+Assert-True ($source -notmatch '(?s)(?:inlineCodes|protectedMath\.maths)\.forEach\(.{0,350}?replaceAll') `
+  "renderer ne sme skenirati ceo HTML posebno za svaki placeholder"
+Assert-True ($source -match 's\s*=\s*s\.replace\(/@@SAFEHTML\(\\d\+\)@@/g[\s\S]{0,500}s\s*=\s*s\.replace\(/@@ESC\(\\d\+\)@@/g') `
+  "safe HTML i escaped znakovi moraju se vratiti jednim linearnim prolazom"
+Assert-True ($source -notmatch '(?s)(?:safeHtml|escaped)\.forEach\(.{0,350}?replaceAll') `
+  "inline renderer ne sme skenirati ceo red posebno za svaki placeholder"
+Assert-True ($source -match 'markdownFenceCloses[\s\S]{0,380}match\[2\]\.length\s*>=\s*opening\.length') `
+  "duži validni closing fence mora zatvoriti isti tip opener-a"
+Assert-True ($source -match 'neutralLanguages\s*=\s*new Set[\s\S]{0,260}"plaintext"[\s\S]{0,260}if\s*\(!neutralLanguages\.has\(language\)\)\s*return false') `
+  "eksplicitni programski i nepoznati fence jezici moraju ostati code block"
+Assert-True ($source -match 'looksLikeJson\s*\|\|[\s\S]{0,120}looksLikeYaml\s*\|\|[\s\S]{0,120}looksLikeMarkup\s*\|\|[\s\S]{0,120}looksLikeListSource\s*\|\|[\s\S]{0,120}codePatterns\.some') `
+  "JSON, YAML, markup, doslovna lista i sadržaj koji liči na program moraju biti zaštićeni od unwrap-a"
+Assert-True ($source -match 'if\s*\(final\s*&&\s*accidental\)') `
+  "heuristički unwrap sme da se desi samo u završnom prikazu"
+Assert-True ($source -match 'extractMarkdownCodeBlocksForRender\(text,\s*codeBlocks,\s*final\)[\s\S]{0,2200}normalizeSchoolMathSource\(text\)[\s\S]{0,500}protectMath\(text\)') `
+  "sav pravi kod mora biti zaštićen pre bilo koje TeX normalizacije"
+Assert-True ($source -notmatch 'repairAccidentalSchoolCodeBlocks|extractIndentedMarkdownCodeBlocks|closeUnfinishedMarkdownFenceForRender') `
+  "stari neusaglašeni fence parseri ne smeju ostati u aplikaciji"
+Assert-True ($source -match 'escapeHtml\(item\.lang\)[\s\S]{0,100}escapeHtml\(item\.code\)') `
+  "fence jezik i pravi kod moraju ostati HTML-escape-ovani"
+Assert-True ($source -match "'ui/safe'") `
+  "MathJax mora filtrirati nepoverljive atribute iz model-generisanih formula"
+Assert-True ($source -match "URLs:\s*'none'[\s\S]{0,180}classes:\s*'none'[\s\S]{0,180}cssIDs:\s*'none'[\s\S]{0,180}styles:\s*'none'") `
+  "formula ne sme praviti linkove, klase, ID-jeve ili stilove"
+Assert-True ($source -match 'safeProtocols:[\s\S]{0,260}javascript:\s*false[\s\S]{0,120}data:\s*false') `
+  "MathJax mora zabraniti javascript i data protokole"
+Assert-True ($source -match 'https://cdn\.jsdelivr\.net/npm/mathjax@4\.1\.3/tex-svg\.js') `
+  "MathJax CDN verzija mora biti tačno pinovana"
 Assert-True ($source -match 'function\s+trailingUnansweredUserMessage\s*\(') `
   "mora postojati prepoznavanje poslednjeg korisnickog turna bez odgovora"
 Assert-True ($source -match 'async\s+function\s+apiImageFromSavedMessage\s*\(') `
@@ -372,12 +410,12 @@ if (Test-Path -LiteralPath $localSecretFile) {
 
 Assert-True ($loader -notmatch 'window\.fetch\s*=|AbortSignal\.timeout|realSetTimeout') `
   "loader više ne sme sadržati Stop monkeypatch"
-Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=19') -eq 9) `
-  "loader mora koristiti svih 9 chunk URL-ova sa v=19"
-Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v25"') `
-  "service worker cache mora biti v25"
-Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=19') -eq 9) `
-  "service worker mora keširati svih 9 chunk URL-ova sa v=19"
+Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=20') -eq 9) `
+  "loader mora koristiti svih 9 chunk URL-ova sa v=20"
+Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v26"') `
+  "service worker cache mora biti v26"
+Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=20') -eq 9) `
+  "service worker mora keširati svih 9 chunk URL-ova sa v=20"
 
 & (Join-Path $PSScriptRoot "build-math-app.ps1") -CheckOnly | Out-Null
 Write-Output "Sve statičke provere matematičke aplikacije su prošle."

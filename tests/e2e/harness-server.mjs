@@ -16,6 +16,21 @@ const UNSUPPORTED_IMAGE_PAYLOAD_MESSAGE =
   'Unsupported image format/MIME';
 const HIGH_DEMAND_MESSAGE =
   'gemini-3.6-flash is currently experiencing high demand, spikes in demand are usually temporary. Please try again later.';
+const MARKDOWN_REPAIR_ANSWER = [
+  '```',
+  '### Drugi interval: \\(-2 \\le x < 1\\)',
+  '',
+  'Tada je \\(|x - 1| = 1 - x\\) i zato računamo razliku.',
+  '',
+  '\\[',
+  '(1 - x) - (x + 2) = -2x - 1',
+  '\\]',
+  '',
+  'Pošto proverom dobijamo jednakost, ovo je **važeće rešenje**.',
+  '',
+  'Bezbednosna provera: \\(\\href{javascript:globalThis.__mathJaxPwned=true}{x=2}\\).',
+  '```'
+].join('\n');
 const EXPECTED_FOUR_PROFILE_ORDER = [
   ['e2e-api-1', MODEL],
   ['e2e-api-2', MODEL],
@@ -33,6 +48,7 @@ const LOCAL_FIRST_SCENARIOS = new Set([
 ]);
 const VALID_SCENARIOS = new Set([
   'success',
+  'markdown-repair',
   'slow',
   'fallback-429',
   'fallback-four',
@@ -623,7 +639,7 @@ function evaluateRequests(requestLog, options = {}) {
   };
 }
 
-function completedInteraction(id) {
+function completedInteraction(id, answerText = '') {
   return {
     id,
     status: 'completed',
@@ -643,7 +659,7 @@ function completedInteraction(id) {
         content: [
           {
             type: 'text',
-            text:
+            text: answerText ||
               'Oduzmemo 3 sa obe strane:\n\n\\[2x=8\\]\n\nPodelimo sa 2:\n\n\\[x=4\\]\n\n**Odgovor:** \\(x=4\\).'
           }
         ]
@@ -655,8 +671,24 @@ function completedInteraction(id) {
 function ssePlan(scenario, interactionId) {
   const completed = {
     event_type: 'interaction.completed',
-    interaction: completedInteraction(interactionId)
+    interaction: completedInteraction(
+      interactionId,
+      scenario === 'markdown-repair' ? MARKDOWN_REPAIR_ANSWER : ''
+    )
   };
+
+  if (scenario === 'markdown-repair') {
+    return [
+      [0, { event_type: 'interaction.created', interaction: { id: interactionId } }],
+      [35, { event_type: 'step.start', index: 0, step: { type: 'model_output' } }],
+      [80, {
+        event_type: 'step.delta',
+        index: 0,
+        delta: { type: 'text', text: MARKDOWN_REPAIR_ANSWER }
+      }],
+      [150, completed]
+    ];
+  }
 
   if (scenario === 'slow') {
     return [
