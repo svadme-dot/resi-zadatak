@@ -390,18 +390,26 @@ Assert-True ($autoScrollState -match 'let\s+autoScrollPinned\s*=\s*true') `
   "novi razgovor mora podrazumevano pratiti dno"
 Assert-True ($autoScrollState -match 'let\s+autoScrollFrameId\s*=\s*null') `
   "smart autoscroll mora pratiti samo jedan pending animation frame"
+Assert-True ($autoScrollState -match 'let\s+autoScrollInteractionHeld\s*=\s*false' -and $autoScrollState -match 'let\s+autoScrollUserActionEpoch\s*=\s*0') `
+  "touch/pointer interakcija mora zaustaviti pending autoscroll bez gubitka pinned stanja"
 Assert-True ($autoScrollState -match 'let\s+autoScrollReattachBlockedUntil\s*=\s*0' -and $autoScrollState -match 'let\s+autoScrollDownIntentUntil\s*=\s*0') `
   "ponovno lepljenje mora razlikovati korisničko listanje nadole od layout pomeraja"
 Assert-True ($source -match 'let\s+completedAutoScrollObserver\s*=\s*null') `
   "završni MathJax resize observer mora imati kontrolisan lifecycle"
 Assert-True ($autoScrollHelpers -match 'function\s+setAutoScrollPinned\s*\(pinned\)[\s\S]{0,180}autoScrollPinned\s*=\s*!!pinned[\s\S]{0,260}!autoScrollPinned\s*&&\s*autoScrollFrameId\s*!==\s*null[\s\S]{0,180}cancelAnimationFrame\(autoScrollFrameId\)[\s\S]{0,100}autoScrollFrameId\s*=\s*null') `
   "odlepljivanje mora odmah otkazati pending autoscroll frame"
-Assert-True ($autoScrollHelpers -match 'function\s+scrollBottom\s*\(smooth\s*=\s*false,\s*force\s*=\s*false\)[\s\S]{0,160}if\s*\(force\)\s*setAutoScrollPinned\(true\)[\s\S]{0,100}if\s*\(!autoScrollPinned\)\s*return') `
+Assert-True ($autoScrollHelpers -match 'function\s+scrollBottom\s*\(smooth\s*=\s*false,\s*force\s*=\s*false\)[\s\S]{0,260}if\s*\(force\)[\s\S]{0,180}setAutoScrollPinned\(true\)[\s\S]{0,160}!autoScrollPinned\s*\|\|\s*autoScrollInteractionHeld') `
   "scrollBottom mora biti čuvan pinned stanjem osim eksplicitnog force-a"
-Assert-True ($autoScrollHelpers -match 'autoScrollFrameId\s*=\s*requestAnimationFrame\(\(\)\s*=>\s*\{[\s\S]{0,180}autoScrollFrameId\s*=\s*null[\s\S]{0,180}if\s*\(!autoScrollPinned\)\s*return[\s\S]{0,180}window\.scrollTo\(') `
-  "pending autoscroll frame mora ponovo proveriti magnet pre pomeranja"
-Assert-True ($autoScrollHelpers -match 'const\s+movedUp\s*=\s*current\s*<\s*previous\s*-\s*AUTO_SCROLL_MOVE_EPSILON[\s\S]{0,340}if\s*\(movedUp\)[\s\S]{0,180}!autoScrollPinned\s*\|\|\s*!autoScrollIsNearBottom\(\)[\s\S]{0,140}detachAutoScrollFromUser\(\)') `
-  "stvarni scroll nagore mora odlepiti magnet kada se korisnik udalji od dna"
+Assert-True ($autoScrollHelpers -match 'const\s+scheduledUserActionEpoch\s*=\s*autoScrollUserActionEpoch[\s\S]{0,300}autoScrollFrameId\s*=\s*requestAnimationFrame\(\(\)\s*=>\s*\{[\s\S]{0,300}autoScrollInteractionHeld[\s\S]{0,220}scheduledUserActionEpoch\s*!==\s*autoScrollUserActionEpoch[\s\S]{0,220}window\.scrollTo\(') `
+  "pending autoscroll frame mora ponovo proveriti magnet, touch hold i korisničku epohu"
+Assert-True ($autoScrollHelpers -match 'function\s+detachAutoScrollFromUser\s*\(\)[\s\S]{0,180}autoScrollUserActionEpoch\+\+[\s\S]{0,100}autoScrollDownIntentUntil\s*=\s*0[\s\S]{0,180}setAutoScrollPinned\(false\)') `
+  "odlepljivanje mora poništiti stari down intent i svaku zakazanu korisničku epohu"
+Assert-True ($autoScrollHelpers -match 'function\s+holdAutoScrollForInteraction\s*\(\)[\s\S]{0,420}autoScrollInteractionHeld\s*=\s*true[\s\S]{0,220}cancelAnimationFrame\(autoScrollFrameId\)') `
+  "pritisak prsta ili pointera mora pauzirati i otkazati pending autoscroll"
+Assert-True ($autoScrollHelpers -match 'const\s+movedUp\s*=\s*current\s*<\s*previous\s*-\s*AUTO_SCROLL_MOVE_EPSILON[\s\S]{0,340}if\s*\(movedUp\)[\s\S]{0,200}!autoScrollPinned\s*\|\|[\s\S]{0,120}!autoScrollIsNearBottom\(1\)[\s\S]{0,140}detachAutoScrollFromUser\(\)') `
+  "scrollbar pomeraj nagore veći od jednog piksela mora odlepiti magnet"
+Assert-True ($autoScrollHelpers -match 'window\.scrollTo\([\s\S]{0,520}chatEl\.scrollTop\s*=\s*chatEl\.scrollHeight[\s\S]{0,120}rememberAutoScrollPositions\(\)') `
+  "programski skrol mora odmah zapamtiti stvarni rezultat radi sledećeg ručnog poređenja"
 Assert-True ($autoScrollHelpers -match 'const\s+movedDown\s*=\s*current\s*>\s*previous\s*\+\s*AUTO_SCROLL_DOWN_EPSILON[\s\S]{0,700}const\s+mayReattach\s*=[\s\S]{0,220}autoScrollReattachBlockedUntil[\s\S]{0,120}autoScrollDownIntentUntil[\s\S]{0,260}movedDown\s*&&\s*mayReattach[\s\S]{0,180}nearBottom[\s\S]{0,120}setAutoScrollPinned\(true\)') `
   "stvarno listanje nadole do dna mora ponovo zalepiti magnet"
 Assert-True ($autoScrollHelpers -match 'function\s+disconnectCompletedAutoScrollObserver\s*\(\)[\s\S]{0,200}completedAutoScrollObserver\.disconnect\(\)[\s\S]{0,100}completedAutoScrollObserver\s*=\s*null') `
@@ -432,6 +440,10 @@ Assert-True ($autoScrollBindings -match 'window\.addEventListener\("scroll",[\s\
   "document scroll mora ažurirati položaj magneta"
 Assert-True ($autoScrollBindings -match 'chatEl\.addEventListener\("scroll",[\s\S]{0,180}syncAutoScrollFromPosition\(chatEl\)') `
   "budući zasebni chat scrollbar mora ažurirati položaj magneta"
+Assert-True ($autoScrollBindings -match 'chatEl\.addEventListener\("pointerdown",[\s\S]{0,220}busy\s*&&\s*liveModel[\s\S]{0,120}holdAutoScrollForInteraction\(\)') `
+  "pointer pritisak u živom razgovoru mora pauzirati magnet pre pomeranja"
+Assert-True ($autoScrollBindings -match 'window\.addEventListener\("pointerup",\s*releaseAutoScrollInteraction[\s\S]{0,180}window\.addEventListener\("pointercancel",\s*releaseAutoScrollInteraction') `
+  "pointer završetak mora deterministički osloboditi touch hold"
 Assert-True ($autoScrollBindings -match 'window\.addEventListener\("wheel",[\s\S]{0,180}event\.deltaY\s*<\s*0[\s\S]{0,120}detachAutoScrollFromUser\(\)') `
   "wheel nagore mora odmah odlepiti magnet"
 Assert-True ($autoScrollBindings -match 'event\.deltaY\s*>\s*0[\s\S]{0,120}noteAutoScrollDownIntent\(\)') `
@@ -572,12 +584,12 @@ if (Test-Path -LiteralPath $localSecretFile) {
 
 Assert-True ($loader -notmatch 'window\.fetch\s*=|AbortSignal\.timeout|realSetTimeout') `
   "loader više ne sme sadržati Stop monkeypatch"
-Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=21') -eq 9) `
-  "loader mora koristiti svih 9 chunk URL-ova sa v=21"
-Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v27"') `
-  "service worker cache mora biti v27"
-Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=21') -eq 9) `
-  "service worker mora keširati svih 9 chunk URL-ova sa v=21"
+Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=22') -eq 9) `
+  "loader mora koristiti svih 9 chunk URL-ova sa v=22"
+Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v28"') `
+  "service worker cache mora biti v28"
+Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=22') -eq 9) `
+  "service worker mora keširati svih 9 chunk URL-ova sa v=22"
 
 & (Join-Path $PSScriptRoot "build-math-app.ps1") -CheckOnly | Out-Null
 Write-Output "Sve statičke provere matematičke aplikacije su prošle."

@@ -253,9 +253,12 @@ async function frontendAutoScrollControllerFixture() {
       '  rememberAutoScrollPositions,',
       '  syncAutoScrollFromPosition,',
       '  detachAutoScrollFromUser,',
+      '  holdAutoScrollForInteraction,',
+      '  releaseAutoScrollInteraction,',
       '  noteAutoScrollDownIntent,',
       '  get nearBottom() { return autoScrollIsNearBottom(); },',
       '  get pinned() { return autoScrollPinned; },',
+      '  get held() { return autoScrollInteractionHeld; },',
       '  get frameId() { return autoScrollFrameId; }',
       '};'
     ].join('\n')
@@ -379,6 +382,44 @@ test('smart autoscroll follows, detaches, reattaches, and rechecks queued frames
   fixture.runFrame(controller.frameId);
   assert.equal(scrollCalls.length, 3);
   assert.equal(scrollCalls[2].resultingTop, 1400);
+});
+
+test('smart autoscroll honors a 5px scrollbar move and pauses while touch is held', async () => {
+  const fixture = await frontendAutoScrollControllerFixture();
+  const { controller, root, scrollCalls } = fixture;
+
+  controller.rememberAutoScrollPositions();
+  fixture.setRootScrollTop(795);
+  controller.syncAutoScrollFromPosition(root);
+  assert.equal(controller.pinned, false);
+
+  root.scrollHeight = 1100;
+  controller.scrollBottom(false);
+  assert.equal(controller.frameId, null);
+  assert.equal(scrollCalls.length, 0);
+
+  controller.scrollBottom(false, true);
+  const queuedBeforeTouch = controller.frameId;
+  assert.notEqual(queuedBeforeTouch, null);
+
+  controller.holdAutoScrollForInteraction();
+  assert.equal(controller.held, true);
+  assert.equal(controller.frameId, null);
+  fixture.runFrame(queuedBeforeTouch, { includeCanceled: true });
+  assert.equal(scrollCalls.length, 0);
+
+  controller.releaseAutoScrollInteraction();
+  assert.equal(controller.held, false);
+  assert.notEqual(controller.frameId, null);
+  fixture.runFrame(controller.frameId);
+  assert.equal(scrollCalls.length, 1);
+  assert.equal(scrollCalls[0].resultingTop, 900);
+
+  // The programmatic write records its resulting top immediately. A following
+  // manual scrollbar move must therefore compare against 900, not stale 795.
+  fixture.setRootScrollTop(850);
+  controller.syncAutoScrollFromPosition(root);
+  assert.equal(controller.pinned, false);
 });
 
 test('renderer repairs accidental fenced and indented school explanations', async () => {

@@ -2737,6 +2737,8 @@ window.MathJax = {
   let autoScrollPinned = true;
   let autoScrollFrameId = null;
   let autoScrollTouchY = null;
+  let autoScrollInteractionHeld = false;
+  let autoScrollUserActionEpoch = 0;
   let autoScrollReattachBlockedUntil = 0;
   let autoScrollDownIntentUntil = 0;
   let lastRootScrollTop = 0;
@@ -5514,8 +5516,30 @@ window.MathJax = {
   }
 
   function detachAutoScrollFromUser() {
+    autoScrollUserActionEpoch++;
+    autoScrollDownIntentUntil = 0;
     autoScrollReattachBlockedUntil = performance.now() + 300;
     setAutoScrollPinned(false);
+  }
+
+  function holdAutoScrollForInteraction() {
+    if (autoScrollInteractionHeld) return;
+    autoScrollInteractionHeld = true;
+    autoScrollUserActionEpoch++;
+
+    if (autoScrollFrameId !== null) {
+      cancelAnimationFrame(autoScrollFrameId);
+      autoScrollFrameId = null;
+    }
+  }
+
+  function releaseAutoScrollInteraction() {
+    if (!autoScrollInteractionHeld) return;
+    autoScrollInteractionHeld = false;
+
+    if (autoScrollPinned) {
+      scrollBottom(false);
+    }
   }
 
   function noteAutoScrollDownIntent() {
@@ -5548,7 +5572,10 @@ window.MathJax = {
     // Ako je layout samo korigovao poziciju, a magnet je i dalje na samom dnu,
     // ostavi ga uključenim. Svako stvarno udaljavanje nagore ga odlepljuje.
     if (movedUp) {
-      if (!autoScrollPinned || !autoScrollIsNearBottom()) {
+      if (
+        !autoScrollPinned ||
+        !autoScrollIsNearBottom(1)
+      ) {
         detachAutoScrollFromUser();
       }
       return;
@@ -5578,8 +5605,16 @@ window.MathJax = {
   }
 
   function scrollBottom(smooth = false, force = false) {
-    if (force) setAutoScrollPinned(true);
-    if (!autoScrollPinned) return;
+    if (force) {
+      autoScrollInteractionHeld = false;
+      setAutoScrollPinned(true);
+    }
+    if (!autoScrollPinned || autoScrollInteractionHeld) return;
+
+    // DOM je možda upravo promenio visinu (reasoning, odgovor ili formula).
+    // Zapamti sinhronu browser poziciju pre zakazivanja sledećeg frejma, da
+    // naredni ručni potez nagore ne bi izgledao kao programsko kretanje nadole.
+    rememberAutoScrollPositions();
 
     if (autoScrollFrameId !== null) {
       cancelAnimationFrame(autoScrollFrameId);
@@ -5588,12 +5623,19 @@ window.MathJax = {
     // Tokom streama koristi trenutni skok: uzastopne smooth animacije bi se
     // borile sa ručnim listanjem. Smooth ostaje za mirne, završene prikaze.
     const behavior = smooth && !busy ? "smooth" : "auto";
+    const scheduledUserActionEpoch = autoScrollUserActionEpoch;
 
     autoScrollFrameId = requestAnimationFrame(() => {
       autoScrollFrameId = null;
 
       // Korisnik je možda otišao nagore dok je frejm čekao.
-      if (!autoScrollPinned) return;
+      if (
+        !autoScrollPinned ||
+        autoScrollInteractionHeld ||
+        scheduledUserActionEpoch !== autoScrollUserActionEpoch
+      ) {
+        return;
+      }
 
       const root = rootScrollElement();
       window.scrollTo({
@@ -5604,6 +5646,7 @@ window.MathJax = {
       // U sadašnjem layout-u skroluje dokument; ovo pokriva i budući layout
       // u kome #chat dobije ograničenu visinu i sopstveni scrollbar.
       chatEl.scrollTop = chatEl.scrollHeight;
+      rememberAutoScrollPositions();
     });
   }
 
@@ -7918,6 +7961,15 @@ window.MathJax = {
     syncAutoScrollFromPosition(chatEl);
   }, { passive:true });
 
+  chatEl.addEventListener("pointerdown", () => {
+    if (busy && liveModel) {
+      holdAutoScrollForInteraction();
+    }
+  }, { capture:true, passive:true });
+
+  window.addEventListener("pointerup", releaseAutoScrollInteraction, { passive:true });
+  window.addEventListener("pointercancel", releaseAutoScrollInteraction, { passive:true });
+
   window.addEventListener("wheel", event => {
     if (event.deltaY < 0) {
       detachAutoScrollFromUser();
@@ -7928,6 +7980,14 @@ window.MathJax = {
 
   window.addEventListener("touchstart", event => {
     autoScrollTouchY = event.touches?.[0]?.clientY ?? null;
+
+    if (
+      busy &&
+      liveModel &&
+      event.target?.closest?.("#chat")
+    ) {
+      holdAutoScrollForInteraction();
+    }
   }, { passive:true });
 
   window.addEventListener("touchmove", event => {
@@ -7952,6 +8012,7 @@ window.MathJax = {
 
   const clearAutoScrollTouch = () => {
     autoScrollTouchY = null;
+    releaseAutoScrollInteraction();
   };
   window.addEventListener("touchend", clearAutoScrollTouch, { passive:true });
   window.addEventListener("touchcancel", clearAutoScrollTouch, { passive:true });
