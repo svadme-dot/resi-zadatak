@@ -2726,6 +2726,21 @@ window.MathJax = {
 
   // Tekući model odgovor dok stiže stream.
   let liveModel = null;
+  let completedAutoScrollObserver = null;
+
+  // "Magnet" prati novi sadržaj samo dok je korisnik na dnu razgovora.
+  // Ručno listanje nagore ga odmah odlepljuje; povratak na dno ga ponovo pali.
+  const AUTO_SCROLL_BOTTOM_GAP = 24;
+  const AUTO_SCROLL_REATTACH_GAP = 4;
+  const AUTO_SCROLL_MOVE_EPSILON = 1;
+  const AUTO_SCROLL_DOWN_EPSILON = 0.01;
+  let autoScrollPinned = true;
+  let autoScrollFrameId = null;
+  let autoScrollTouchY = null;
+  let autoScrollReattachBlockedUntil = 0;
+  let autoScrollDownIntentUntil = 0;
+  let lastRootScrollTop = 0;
+  let lastChatScrollTop = 0;
 
   const CHAT_ZOOM_MIN = 0.65;
   const CHAT_ZOOM_MAX = 1.35;
@@ -5437,14 +5452,165 @@ window.MathJax = {
     scheduleMath(container, final);
   }
 
-  function scrollBottom(smooth = false) {
-    requestAnimationFrame(() => {
+  function rootScrollElement() {
+    return document.scrollingElement || document.documentElement;
+  }
+
+  function scrollTopFor(area) {
+    if (area === rootScrollElement()) {
+      return Number(window.scrollY || area.scrollTop || 0);
+    }
+
+    return Number(area?.scrollTop || 0);
+  }
+
+  function scrollBottomGapFor(area) {
+    if (!area) return 0;
+
+    const root = rootScrollElement();
+    const viewportHeight = area === root
+      ? Number(root.clientHeight || window.innerHeight || 0)
+      : Number(area.clientHeight || 0);
+    const maxScrollTop = Math.max(
+      0,
+      Number(area.scrollHeight || 0) - viewportHeight
+    );
+
+    return Math.max(0, maxScrollTop - scrollTopFor(area));
+  }
+
+  function autoScrollIsNearBottom(gap = AUTO_SCROLL_BOTTOM_GAP) {
+    const root = rootScrollElement();
+    const rootHasRange = scrollBottomGapFor(root) > 0 ||
+      Number(root.scrollHeight || 0) >
+        Number(root.clientHeight || window.innerHeight || 0) + 1;
+    const chatHasRange = Number(chatEl.scrollHeight || 0) >
+      Number(chatEl.clientHeight || 0) + 1;
+
+    if (
+      rootHasRange &&
+      scrollBottomGapFor(root) > gap
+    ) {
+      return false;
+    }
+
+    if (
+      chatHasRange &&
+      scrollBottomGapFor(chatEl) > gap
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function setAutoScrollPinned(pinned) {
+    autoScrollPinned = !!pinned;
+
+    if (!autoScrollPinned && autoScrollFrameId !== null) {
+      cancelAnimationFrame(autoScrollFrameId);
+      autoScrollFrameId = null;
+    }
+  }
+
+  function detachAutoScrollFromUser() {
+    autoScrollReattachBlockedUntil = performance.now() + 300;
+    setAutoScrollPinned(false);
+  }
+
+  function noteAutoScrollDownIntent() {
+    autoScrollDownIntentUntil = performance.now() + 300;
+  }
+
+  function rememberAutoScrollPositions() {
+    lastRootScrollTop = scrollTopFor(rootScrollElement());
+    lastChatScrollTop = scrollTopFor(chatEl);
+  }
+
+  function syncAutoScrollFromPosition(area) {
+    const isRoot = area === rootScrollElement();
+    const current = scrollTopFor(area);
+    const previous = isRoot
+      ? lastRootScrollTop
+      : lastChatScrollTop;
+
+    if (isRoot) {
+      lastRootScrollTop = current;
+    } else {
+      lastChatScrollTop = current;
+    }
+
+    const movedUp =
+      current < previous - AUTO_SCROLL_MOVE_EPSILON;
+    const movedDown =
+      current > previous + AUTO_SCROLL_DOWN_EPSILON;
+
+    // Ako je layout samo korigovao poziciju, a magnet je i dalje na samom dnu,
+    // ostavi ga uključenim. Svako stvarno udaljavanje nagore ga odlepljuje.
+    if (movedUp) {
+      if (!autoScrollPinned || !autoScrollIsNearBottom()) {
+        detachAutoScrollFromUser();
+      }
+      return;
+    }
+
+    // Jednom odlepljen magnet se vraća tek kada korisnik stvarno lista nadole
+    // i stigne do dna, ne zbog sporednog scroll događaja bez pomeranja.
+    const nearBottom = autoScrollIsNearBottom(
+      autoScrollPinned
+        ? AUTO_SCROLL_BOTTOM_GAP
+        : AUTO_SCROLL_REATTACH_GAP
+    );
+    const now = performance.now();
+    const mayReattach =
+      now >= autoScrollReattachBlockedUntil ||
+      now <= autoScrollDownIntentUntil;
+
+    if (
+      (
+        autoScrollPinned ||
+        (movedDown && mayReattach)
+      ) &&
+      nearBottom
+    ) {
+      setAutoScrollPinned(true);
+    }
+  }
+
+  function scrollBottom(smooth = false, force = false) {
+    if (force) setAutoScrollPinned(true);
+    if (!autoScrollPinned) return;
+
+    if (autoScrollFrameId !== null) {
+      cancelAnimationFrame(autoScrollFrameId);
+    }
+
+    // Tokom streama koristi trenutni skok: uzastopne smooth animacije bi se
+    // borile sa ručnim listanjem. Smooth ostaje za mirne, završene prikaze.
+    const behavior = smooth && !busy ? "smooth" : "auto";
+
+    autoScrollFrameId = requestAnimationFrame(() => {
+      autoScrollFrameId = null;
+
+      // Korisnik je možda otišao nagore dok je frejm čekao.
+      if (!autoScrollPinned) return;
+
+      const root = rootScrollElement();
       window.scrollTo({
-        top: document.body.scrollHeight,
-        behavior: smooth ? "smooth" : "auto"
+        top: Number(root.scrollHeight || 0),
+        behavior
       });
+
+      // U sadašnjem layout-u skroluje dokument; ovo pokriva i budući layout
+      // u kome #chat dobije ograničenu visinu i sopstveni scrollbar.
       chatEl.scrollTop = chatEl.scrollHeight;
     });
+  }
+
+  function disconnectCompletedAutoScrollObserver() {
+    if (!completedAutoScrollObserver) return;
+    completedAutoScrollObserver.disconnect();
+    completedAutoScrollObserver = null;
   }
 
   function addStaticMessage(m) {
@@ -5554,6 +5720,24 @@ window.MathJax = {
       `</span>`;
     details.appendChild(summary);
 
+    const prepareReasoningInspection = () => {
+      if (
+        !details.open &&
+        liveModel?.details === details &&
+        liveModel.answerStarted
+      ) {
+        // Odlepi pre nego što browser otvori <details> i ResizeObserver stigne
+        // da reaguje na njegovu novu visinu.
+        detachAutoScrollFromUser();
+      }
+    };
+    summary.addEventListener("pointerdown", prepareReasoningInspection);
+    summary.addEventListener("keydown", event => {
+      if (["Enter", " "].includes(event.key)) {
+        prepareReasoningInspection();
+      }
+    });
+
     const thinkingBody = document.createElement("div");
     thinkingBody.className = "thinkingBody";
 
@@ -5598,8 +5782,40 @@ window.MathJax = {
       totalMs: 0,
       thinkingStartedAt: performance.now(),
       thinkingMs: 0,
-      thinkingTimerId: null
+      thinkingTimerId: null,
+      resizeObserver: null
     };
+
+    details.addEventListener("toggle", () => {
+      // Otvaranje završenog reasoning-a tokom živog odgovora znači da korisnik
+      // želi da ga čita; sledeća delta zato ne sme da ga vrati na dno.
+      if (
+        details.open &&
+        liveModel?.details === details &&
+        liveModel.answerStarted
+      ) {
+        detachAutoScrollFromUser();
+      }
+    });
+
+    if ("ResizeObserver" in window) {
+      const observedRow = row;
+      const resizeObserver = new ResizeObserver(() => {
+        // MathJax može promeniti visinu nekoliko frejmova posle tekstualne
+        // delte. Magnet tada dopunjava pomeraj samo ako je i dalje zalepljen.
+        if (
+          observedRow.isConnected &&
+          (
+            liveModel?.row === observedRow ||
+            completedAutoScrollObserver === resizeObserver
+          )
+        ) {
+          scrollBottom(false);
+        }
+      });
+      liveModel.resizeObserver = resizeObserver;
+      resizeObserver.observe(row);
+    }
 
     liveModel.thinkingTimerId = setInterval(() => {
       if (!liveModel || liveModel.answerStarted) return;
@@ -5608,7 +5824,7 @@ window.MathJax = {
         `Razmišlja: ${formatThinkingTime(liveModel.thinkingMs)}`;
     }, 100);
 
-    scrollBottom(true);
+    scrollBottom(true, true);
   }
 
   function updateLiveThinking(textDelta, initial = false) {
@@ -5631,13 +5847,13 @@ window.MathJax = {
       liveModel.thinkingTimer.textContent =
         `Razmišljao ${formatThinkingTime(liveModel.thinkingMs)}`;
 
-      // Dok razmišlja ostaje otvoreno; kada krene finalni odgovor
-      // sažetak se sklopi ali ostaje dostupan na klik.
+      // Kada krene finalni odgovor sažetak se sklapa samo dok magnet prati dno.
+      // Ako je korisnik otišao nagore da ga čita, sadržaj ostaje otvoren.
       const dots = liveModel.details.querySelector(".thinkingLive");
       if (dots) dots.innerHTML = `<span style="color:#77869d">gotovo</span>`;
-      if (liveModel.thinking) {
+      if (liveModel.thinking && autoScrollPinned) {
         liveModel.details.open = false;
-      } else {
+      } else if (!liveModel.thinking) {
         liveModel.details.style.display = "none";
       }
     }
@@ -5666,9 +5882,9 @@ window.MathJax = {
       const dots = liveModel.details.querySelector(".thinkingLive");
       if (dots) dots.innerHTML = `<span style="color:#77869d">gotovo</span>`;
 
-      if (liveModel.thinking) {
+      if (liveModel.thinking && autoScrollPinned) {
         liveModel.details.open = false;
-      } else {
+      } else if (!liveModel.thinking) {
         liveModel.details.style.display = "none";
       }
     }
@@ -5746,11 +5962,14 @@ window.MathJax = {
     });
     saveHistory();
 
+    disconnectCompletedAutoScrollObserver();
+    completedAutoScrollObserver = liveModel.resizeObserver;
     liveModel = null;
     scrollBottom(true);
   }
 
   function render() {
+    disconnectCompletedAutoScrollObserver();
     chatEl.innerHTML = "";
 
     if (!history.length) {
@@ -5766,7 +5985,7 @@ window.MathJax = {
 
     for (const m of history) addStaticMessage(m);
     syncSendButtonLabel();
-    scrollBottom(false);
+    scrollBottom(false, true);
   }
 
   function autoGrow() {
@@ -7594,7 +7813,6 @@ window.MathJax = {
             ? "Zaustavljeno"
             : "Prekinuto"
       );
-      scrollBottom(true);
     }
   }
 
@@ -7689,6 +7907,78 @@ window.MathJax = {
   }
 
   el("keyBtn").addEventListener("click", openSettings);
+
+  rememberAutoScrollPositions();
+
+  window.addEventListener("scroll", () => {
+    syncAutoScrollFromPosition(rootScrollElement());
+  }, { passive:true });
+
+  chatEl.addEventListener("scroll", () => {
+    syncAutoScrollFromPosition(chatEl);
+  }, { passive:true });
+
+  window.addEventListener("wheel", event => {
+    if (event.deltaY < 0) {
+      detachAutoScrollFromUser();
+    } else if (event.deltaY > 0) {
+      noteAutoScrollDownIntent();
+    }
+  }, { passive:true });
+
+  window.addEventListener("touchstart", event => {
+    autoScrollTouchY = event.touches?.[0]?.clientY ?? null;
+  }, { passive:true });
+
+  window.addEventListener("touchmove", event => {
+    const nextY = event.touches?.[0]?.clientY;
+    if (!Number.isFinite(nextY)) return;
+
+    // Prst ide nadole -> sadržaj se lista nagore.
+    if (
+      Number.isFinite(autoScrollTouchY) &&
+      nextY > autoScrollTouchY + 2
+    ) {
+      detachAutoScrollFromUser();
+    } else if (
+      Number.isFinite(autoScrollTouchY) &&
+      nextY < autoScrollTouchY - 2
+    ) {
+      noteAutoScrollDownIntent();
+    }
+
+    autoScrollTouchY = nextY;
+  }, { passive:true });
+
+  const clearAutoScrollTouch = () => {
+    autoScrollTouchY = null;
+  };
+  window.addEventListener("touchend", clearAutoScrollTouch, { passive:true });
+  window.addEventListener("touchcancel", clearAutoScrollTouch, { passive:true });
+
+  document.addEventListener("keydown", event => {
+    const target = event.target;
+    if (
+      target?.closest?.(
+        'input, textarea, select, button, a, summary, [role="button"]'
+      ) ||
+      target?.isContentEditable
+    ) {
+      return;
+    }
+
+    if (
+      ["ArrowUp", "PageUp", "Home"].includes(event.key) ||
+      (event.key === " " && event.shiftKey)
+    ) {
+      detachAutoScrollFromUser();
+    } else if (
+      ["ArrowDown", "PageDown", "End"].includes(event.key) ||
+      (event.key === " " && !event.shiftKey)
+    ) {
+      noteAutoScrollDownIntent();
+    }
+  });
 
   chatZoomOut.addEventListener("click", () => {
     changeChatZoom(-CHAT_ZOOM_STEP);

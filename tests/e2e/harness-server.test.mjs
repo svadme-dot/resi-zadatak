@@ -174,6 +174,123 @@ async function frontendRenderer() {
   )();
 }
 
+async function frontendAutoScrollControllerFixture() {
+  const source = await frontendSource();
+  const stateSource = sourceSlice(
+    source,
+    '  const AUTO_SCROLL_BOTTOM_GAP',
+    '  const CHAT_ZOOM_MIN'
+  );
+  const helperSource = sourceSlice(
+    source,
+    '  function rootScrollElement',
+    '  function addStaticMessage'
+  );
+
+  const root = {
+    clientHeight: 200,
+    scrollHeight: 1000,
+    scrollTop: 800
+  };
+  const chat = {
+    clientHeight: 200,
+    scrollHeight: 200,
+    scrollTop: 0
+  };
+  const scrollCalls = [];
+  const frames = new Map();
+  let nextFrameId = 1;
+  let now = 1000;
+
+  const fakeWindow = {
+    innerHeight: 200,
+    scrollY: 800,
+    scrollTo({ top, behavior }) {
+      const maxScrollTop = Math.max(
+        0,
+        root.scrollHeight - fakeWindow.innerHeight
+      );
+      root.scrollTop = Math.min(maxScrollTop, Number(top) || 0);
+      fakeWindow.scrollY = root.scrollTop;
+      scrollCalls.push({
+        behavior,
+        requestedTop: Number(top) || 0,
+        resultingTop: root.scrollTop
+      });
+    }
+  };
+  const fakeDocument = {
+    documentElement: root,
+    scrollingElement: root
+  };
+  const fakePerformance = {
+    now: () => now
+  };
+  const requestAnimationFrame = callback => {
+    const id = nextFrameId++;
+    frames.set(id, { callback, canceled: false });
+    return id;
+  };
+  const cancelAnimationFrame = id => {
+    const frame = frames.get(id);
+    if (frame) frame.canceled = true;
+  };
+
+  const createController = new Function(
+    'window',
+    'document',
+    'chatEl',
+    'performance',
+    'requestAnimationFrame',
+    'cancelAnimationFrame',
+    [
+      '"use strict";',
+      'let busy = false;',
+      stateSource,
+      helperSource,
+      'return {',
+      '  scrollBottom,',
+      '  rememberAutoScrollPositions,',
+      '  syncAutoScrollFromPosition,',
+      '  detachAutoScrollFromUser,',
+      '  noteAutoScrollDownIntent,',
+      '  get nearBottom() { return autoScrollIsNearBottom(); },',
+      '  get pinned() { return autoScrollPinned; },',
+      '  get frameId() { return autoScrollFrameId; }',
+      '};'
+    ].join('\n')
+  );
+  const controller = createController(
+    fakeWindow,
+    fakeDocument,
+    chat,
+    fakePerformance,
+    requestAnimationFrame,
+    cancelAnimationFrame
+  );
+
+  return {
+    chat,
+    controller,
+    frames,
+    root,
+    scrollCalls,
+    setNow(value) {
+      now = Number(value);
+    },
+    setRootScrollTop(value) {
+      root.scrollTop = Number(value);
+      fakeWindow.scrollY = root.scrollTop;
+    },
+    runFrame(id, { includeCanceled = false } = {}) {
+      const frame = frames.get(id);
+      assert.ok(frame, 'expected queued animation frame');
+      if (!frame.canceled || includeCanceled) frame.callback();
+      frames.delete(id);
+    }
+  };
+}
+
 function accidentalSchoolFence(marker = '```', language = '') {
   return [
     marker + language,
@@ -189,6 +306,80 @@ function accidentalSchoolFence(marker = '```', language = '') {
     marker
   ].join('\n');
 }
+
+test('smart autoscroll follows, detaches, reattaches, and rechecks queued frames', async () => {
+  const fixture = await frontendAutoScrollControllerFixture();
+  const {
+    controller,
+    root,
+    scrollCalls
+  } = fixture;
+
+  assert.equal(controller.pinned, true);
+  controller.rememberAutoScrollPositions();
+
+  // A new streamed token grows the document after the user was at the old
+  // bottom. Cached pinned state must follow the new bottom.
+  root.scrollHeight = 1200;
+  controller.scrollBottom(false);
+  const firstFrame = controller.frameId;
+  assert.notEqual(firstFrame, null);
+  fixture.runFrame(firstFrame);
+  assert.equal(scrollCalls.length, 1);
+  assert.equal(scrollCalls[0].behavior, 'auto');
+  assert.equal(scrollCalls[0].requestedTop, 1200);
+  assert.equal(scrollCalls[0].resultingTop, 1000);
+
+  // A real upward movement outside the programmatic grace period detaches.
+  controller.rememberAutoScrollPositions();
+  fixture.setNow(2000);
+  fixture.setRootScrollTop(700);
+  controller.syncAutoScrollFromPosition(root);
+  assert.equal(controller.pinned, false);
+
+  root.scrollHeight = 1400;
+  controller.scrollBottom(false);
+  assert.equal(controller.frameId, null);
+  assert.equal(scrollCalls.length, 1);
+
+  // Scrolling back to the current bottom reattaches. The next token then
+  // follows the newly extended bottom again.
+  fixture.setRootScrollTop(1190);
+  assert.equal(controller.nearBottom, true);
+  controller.syncAutoScrollFromPosition(root);
+  assert.equal(controller.pinned, false);
+
+  controller.noteAutoScrollDownIntent();
+  fixture.setRootScrollTop(1200);
+  controller.syncAutoScrollFromPosition(root);
+  assert.equal(controller.pinned, true);
+
+  root.scrollHeight = 1500;
+  controller.scrollBottom(false);
+  fixture.runFrame(controller.frameId);
+  assert.equal(scrollCalls.length, 2);
+  assert.equal(scrollCalls[1].resultingTop, 1300);
+
+  // Even if a canceled RAF callback is already queued by the browser, its
+  // in-frame pinned check must prevent a late snap to the bottom.
+  root.scrollHeight = 1600;
+  controller.scrollBottom(false);
+  const staleFrame = controller.frameId;
+  assert.notEqual(staleFrame, null);
+  controller.detachAutoScrollFromUser();
+  assert.equal(controller.pinned, false);
+  assert.equal(controller.frameId, null);
+  fixture.runFrame(staleFrame, { includeCanceled: true });
+  assert.equal(scrollCalls.length, 2);
+
+  // Explicit force is reserved for starting/opening a conversation and must
+  // deliberately restore the magnet.
+  controller.scrollBottom(false, true);
+  assert.equal(controller.pinned, true);
+  fixture.runFrame(controller.frameId);
+  assert.equal(scrollCalls.length, 3);
+  assert.equal(scrollCalls[2].resultingTop, 1400);
+});
 
 test('renderer repairs accidental fenced and indented school explanations', async () => {
   const { markdownToHtml } = await frontendRenderer();
