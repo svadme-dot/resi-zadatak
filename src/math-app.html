@@ -94,6 +94,7 @@ window.MathJax = {
     --thinking:#111722;
     --thinking-border:#283449;
     --danger:#ff8a8a;
+    --success:#55df91;
     --code:#0c1119;
   }
 
@@ -601,6 +602,10 @@ window.MathJax = {
   }
   .stopGeneration[hidden]{display:none}
   .stopGeneration:disabled{opacity:.78;cursor:default}
+  .stopGeneration.completed{
+    border-color:rgba(74,222,128,.55);
+    color:var(--success)
+  }
 
   #status{
     height:18px;
@@ -1584,6 +1589,7 @@ window.MathJax = {
     --thinking:#f7f9fc;
     --thinking-border:#dce3ed;
     --danger:#c83d4b;
+    --success:#218a4d;
     --code:#f2f4f7;
   }
 
@@ -4109,6 +4115,7 @@ window.MathJax = {
 
     userStopRequested = false;
     activeSolveController = new AbortController();
+    stopGenerationBtn.classList.remove("completed");
     stopGenerationBtn.textContent = "■ Stop";
     stopGenerationBtn.disabled = false;
     stopGenerationBtn.hidden = false;
@@ -4117,6 +4124,7 @@ window.MathJax = {
 
   function finishSolveControl(label = "✓ Gotovo") {
     activeSolveController = null;
+    stopGenerationBtn.classList.toggle("completed", label === "✓ Gotovo");
     stopGenerationBtn.textContent = label;
     stopGenerationBtn.disabled = true;
     stopGenerationBtn.hidden = false;
@@ -4128,6 +4136,7 @@ window.MathJax = {
     stopButtonHideTimer = setTimeout(() => {
       stopGenerationBtn.hidden = true;
       stopGenerationBtn.disabled = false;
+      stopGenerationBtn.classList.remove("completed");
       stopGenerationBtn.textContent = "■ Stop";
       stopButtonHideTimer = null;
     }, 1200);

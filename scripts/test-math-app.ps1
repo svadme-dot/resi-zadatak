@@ -383,6 +383,18 @@ Assert-True ($source -match 'activeSolveController\s*=\s*new AbortController') `
   "Stop mora koristiti eksplicitni solve AbortController"
 Assert-True ($source -match 'isUserStopError\(err, solveSignal\)') `
   "send mora posebno obraditi korisnički Stop"
+Assert-True ($source -match '\.stopGeneration\.completed\s*\{[\s\S]{0,180}color:\s*var\(--success\)') `
+  "završno Gotovo stanje Stop dugmeta mora biti zeleno"
+Assert-True (
+  ($source -match 'function\s+finishSolveControl\(label\s*=\s*"[^"]*Gotovo"\)') -and
+  ($source -match 'classList\.toggle\("completed",\s*label\s*===\s*"[^"]*Gotovo"\)')
+) `
+  "samo uspešno Gotovo stanje sme dobiti zelenu completed klasu"
+Assert-True (
+  ($source -match 'function\s+beginSolveControl\(\)[\s\S]{0,420}classList\.remove\("completed"\)') -and
+  ($source -match 'stopGenerationBtn\.textContent\s*=\s*"[^"]*Stop"')
+) `
+  "novi Stop ciklus mora ukloniti zelenu completed klasu"
 
 Assert-True ($autoScrollState -match 'const\s+AUTO_SCROLL_BOTTOM_GAP\s*=\s*\d+') `
   "smart autoscroll mora imati mali prag za ponovno lepljenje na dno"
@@ -584,12 +596,12 @@ if (Test-Path -LiteralPath $localSecretFile) {
 
 Assert-True ($loader -notmatch 'window\.fetch\s*=|AbortSignal\.timeout|realSetTimeout') `
   "loader više ne sme sadržati Stop monkeypatch"
-Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=22') -eq 9) `
-  "loader mora koristiti svih 9 chunk URL-ova sa v=22"
-Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v28"') `
-  "service worker cache mora biti v28"
-Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=22') -eq 9) `
-  "service worker mora keširati svih 9 chunk URL-ova sa v=22"
+Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=23') -eq 9) `
+  "loader mora koristiti svih 9 chunk URL-ova sa v=23"
+Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v29"') `
+  "service worker cache mora biti v29"
+Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=23') -eq 9) `
+  "service worker mora keširati svih 9 chunk URL-ova sa v=23"
 
 & (Join-Path $PSScriptRoot "build-math-app.ps1") -CheckOnly | Out-Null
 Write-Output "Sve statičke provere matematičke aplikacije su prošle."
