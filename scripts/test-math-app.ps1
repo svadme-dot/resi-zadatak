@@ -200,6 +200,15 @@ $profileSelection = $source.Substring(
   $profileSelectionEnd - $profileSelectionStart
 )
 
+$generationSettingsStart = $source.IndexOf("  function normalizeGenerationSettings")
+$generationSettingsEnd = $source.IndexOf("  function openSettings", $generationSettingsStart)
+Assert-True ($generationSettingsStart -ge 0 -and $generationSettingsEnd -gt $generationSettingsStart) `
+  "persistent generation settings helperi nisu pronađeni"
+$generationSettingsHelpers = $source.Substring(
+  $generationSettingsStart,
+  $generationSettingsEnd - $generationSettingsStart
+)
+
 $solveProfilesStart = $source.IndexOf("      const phaseProfiles = profiles;")
 $solveProfilesEnd = $source.IndexOf("      if (!solved) {", $solveProfilesStart)
 Assert-True ($solveProfilesStart -ge 0 -and $solveProfilesEnd -gt $solveProfilesStart) `
@@ -249,9 +258,9 @@ Assert-True ($source -match 'const\s+API_GATEWAY_URL\s*=') `
   "frontend mora koristiti server-side API gateway"
 Assert-True ($source -match 'const\s+API_SLOT_ORDER\s*=\s*Object\.freeze\(\[1,\s*2,\s*3,\s*4\]\)') `
   "redosled API slotova mora ostati 1, 2, 3, 4"
-Assert-True ($profileSelection -match 'const\s+localProfiles\s*=\s*getConfiguredLocalApiProfiles\(\)[\s\S]{0,100}if\s*\(localProfiles\.length\)\s*return\s+localProfiles') `
+Assert-True ($profileSelection -match 'const\s+requestGenerationSettings\s*=\s*generationSettingsSnapshot\(\)[\s\S]{0,220}const\s+localProfiles\s*=\s*getConfiguredLocalApiProfiles\(\)[\s\S]{0,180}localProfiles\.map\(withGenerationSettings\)') `
   "bar jedan lokalni ključ mora izabrati samo lokalne profile"
-Assert-True ($profileSelection -match 'return\s+API_SLOT_ORDER\.map\(slot\s*=>\s*\(\{[\s\S]{0,100}transport:\s*"gateway"[\s\S]{0,80}\bslot\b') `
+Assert-True ($profileSelection -match 'return\s+API_SLOT_ORDER\.map\(slot\s*=>[\s\S]{0,160}withGenerationSettings\(\{[\s\S]{0,100}transport:\s*"gateway"[\s\S]{0,80}\bslot\b') `
   "tek nula lokalnih ključeva mora izabrati neutralne gateway slotove 1-4"
 Assert-True ($source -match '"X-Math-Api-Slot":\s*String\(profile\.slot\)') `
   "gateway zahtev mora slati samo neutralni broj API slota"
@@ -262,23 +271,49 @@ Assert-True ((Count-Matches $source '"x-goog-api-key":\s*profile\.key') -eq 1) `
 Assert-True ($transportFetch -match 'profile\.transport\s*===\s*"local"[\s\S]{0,520}"x-goog-api-key":\s*profile\.key') `
   "direktan credential header mora biti ograničen na lokalnu transport fazu"
 Assert-True ($request -notmatch '\bmodel\s*:|system_instruction\s*:|generation_config\s*:|tools\s*:') `
-  "javni gateway body ne sme slati model, prompt, alate ili thinking konfiguraciju"
+  "javni gateway body ne sme slati model, prompt, raw alate ili raw generation config"
+Assert-True ($request -match 'generation_settings:\s*[\r\n\s]*generationSettingsForRequest\(requestGenerationSettings\)') `
+  "javni body mora slati samo neutralni validirani generation_settings objekat"
 Assert-True ($localBuilder -match 'model:\s*LOCAL_UPSTREAM_MODEL') `
   "lokalni builder mora fiksirati isti model"
 Assert-True ($localBuilder -match 'system_instruction:\s*SYSTEM_INSTRUCTION') `
   "lokalni builder mora fiksirati isti system prompt"
-Assert-True ($localBuilder -match 'tools:\s*\[\{\s*type:\s*"code_execution"\s*\}\]') `
-  "lokalni builder mora zadržati code_execution"
-Assert-True ($localBuilder -match 'thinking_level:\s*"high"') `
-  "lokalni builder mora zadržati high thinking"
+Assert-True ($localBuilder -match 'if\s*\(requestSettings\.codeExecution\)[\s\S]{0,140}body\.tools\s*=\s*\[\{\s*type:\s*"code_execution"\s*\}\]') `
+  "lokalni builder mora dodati samo code_execution kada je uključen"
+Assert-True ($localBuilder -match 'thinking_level:\s*requestSettings\.thinkingLevel') `
+  "lokalni builder mora primeniti strogo normalizovan thinking nivo"
 Assert-True ($localBuilder -match 'thinking_summaries:\s*"auto"') `
   "lokalni builder mora zadržati automatske thinking sažetke"
-Assert-True ($sourceOutsideLocalBuilder -notmatch '\bmodel\s*:|system_instruction\s*:|generation_config\s*:|thinking_level\s*:|thinking_summaries\s*:|tools\s*:') `
+Assert-True ($sourceOutsideLocalBuilder -notmatch '\bmodel\s*:|system_instruction\s*:|generation_config\s*:|thinking_summaries\s*:|tools\s*:') `
   "fiksna provider/model konfiguracija sme postojati samo u lokalnom builderu"
 Assert-True ($interactionInput -match 'resolution:\s*IMAGE_MEDIA_RESOLUTION') `
   "svaka slika mora traziti high media resolution"
 Assert-True ($source -match 'const\s+IMAGE_MEDIA_RESOLUTION\s*=\s*"high"') `
   "Interactions media resolution mora biti high"
+Assert-True ($source -match 'const\s+GENERATION_SETTINGS_STORAGE\s*=\s*\r?\n\s*"matematika_generation_settings_v1"') `
+  "generation podešavanja moraju imati zaseban trajni storage ključ"
+Assert-True ($source -match 'const\s+DEFAULT_GENERATION_SETTINGS\s*=\s*Object\.freeze\(\{[\s\S]{0,140}thinkingLevel:\s*"high"[\s\S]{0,100}codeExecution:\s*true') `
+  "stare instalacije moraju podrazumevano ostati high + code execution"
+Assert-True ((Count-Matches $source 'data-thinking-level="(?:minimal|low|medium|high)"') -eq 4) `
+  "Settings mora nuditi tačno četiri dozvoljena thinking nivoa"
+Assert-True ((Count-Matches $source 'data-code-execution="(?:true|false)"') -eq 2) `
+  "Settings mora nuditi samo uključeno ili isključeno izvršavanje koda"
+Assert-True ($generationSettingsHelpers -match 'THINKING_LEVELS\.includes\(value\.thinkingLevel\)[\s\S]{0,180}DEFAULT_GENERATION_SETTINGS\.thinkingLevel') `
+  "nepoznat thinking nivo mora pasti na dosadašnji high"
+Assert-True ($generationSettingsHelpers -match 'typeof\s+value\.codeExecution\s*===\s*"boolean"[\s\S]{0,180}DEFAULT_GENERATION_SETTINGS\.codeExecution') `
+  "code execution mora prihvatiti samo pravi boolean i inače ostati uključen"
+Assert-True ($generationSettingsHelpers -match 'localStorage\.getItem\(GENERATION_SETTINGS_STORAGE\)[\s\S]{0,420}JSON\.parse\(stored\)[\s\S]{0,220}DEFAULT_GENERATION_SETTINGS') `
+  "generation podešavanja moraju preživeti ponovno otvaranje i bezbedno podneti corrupt storage"
+Assert-True ($generationSettingsHelpers -match 'localStorage\.setItem\([\s\S]{0,80}GENERATION_SETTINGS_STORAGE[\s\S]{0,180}JSON\.stringify\(normalized\)') `
+  "promena generation podešavanja mora odmah biti trajno sačuvana"
+Assert-True ($generationSettingsHelpers -notmatch 'LOCAL_FALLBACK_STORAGE|LEGACY_KEY_STORAGE|localKeyInputs') `
+  "generation podešavanja ne smeju dirati postojeće lokalne API ključeve"
+Assert-True ($generationSettingsHelpers -match 'function\s+clearGenerationInteractionContinuations\(\)[\s\S]{0,180}previousInteractionId\s*=\s*""[\s\S]{0,100}previousInteractionProfileId\s*=\s*""[\s\S]{0,320}chat\.interactionId\s*=\s*""[\s\S]{0,100}chat\.interactionProfileId\s*=\s*""') `
+  "promena konfiguracije mora bez brisanja istorije poništiti stare continuation ID-jeve"
+Assert-True ($generationSettingsHelpers -match 'function\s+applyGenerationSettings\(nextSettings\)[\s\S]{0,180}busy\s*\|\|\s*sendPreparing[\s\S]{0,520}saveGenerationSettings\(next\)[\s\S]{0,160}if\s*\(changed\)\s*clearGenerationInteractionContinuations\(\)') `
+  "podešavanja se ne smeju menjati usred odgovora i moraju invalidirati continuation samo pri promeni"
+Assert-True ($source -match 'function\s+openSettings\(\)[\s\S]{0,120}syncThemeButtons\(\)[\s\S]{0,100}syncGenerationSettingsControls\(\)') `
+  "otvaranje Settings-a mora prikazati trajno sačuvane generation vrednosti"
 Assert-True ($source -match 'const\s+MAX_API_IMAGE_BYTES\s*=\s*1536\s*\*\s*1024') `
   "frontend mora zadržati sliku ispod bezbednog Worker/Free CPU plafona"
 Assert-True ($source -match '\[1800,\s*0\.9\][\s\S]{0,1200}blob\.size\s*<=\s*MAX_API_IMAGE_BYTES') `
@@ -596,12 +631,12 @@ if (Test-Path -LiteralPath $localSecretFile) {
 
 Assert-True ($loader -notmatch 'window\.fetch\s*=|AbortSignal\.timeout|realSetTimeout') `
   "loader više ne sme sadržati Stop monkeypatch"
-Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=23') -eq 9) `
-  "loader mora koristiti svih 9 chunk URL-ova sa v=23"
-Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v29"') `
-  "service worker cache mora biti v29"
-Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=23') -eq 9) `
-  "service worker mora keširati svih 9 chunk URL-ova sa v=23"
+Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=24') -eq 9) `
+  "loader mora koristiti svih 9 chunk URL-ova sa v=24"
+Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v30"') `
+  "service worker cache mora biti v30"
+Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=24') -eq 9) `
+  "service worker mora keširati svih 9 chunk URL-ova sa v=24"
 
 & (Join-Path $PSScriptRoot "build-math-app.ps1") -CheckOnly | Out-Null
 Write-Output "Sve statičke provere matematičke aplikacije su prošle."

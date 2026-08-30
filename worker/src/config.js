@@ -34,18 +34,26 @@ export const MAX_SYNC_RESPONSE_BYTES = 1024 * 1024;
 export const DEFAULT_UPSTREAM_TIMEOUT_MS = 120_000;
 
 export function buildUpstreamBody(publicBody) {
+  const thinkingLevel =
+    publicBody.generation_settings?.thinking_level ?? "high";
+  const codeExecution =
+    publicBody.generation_settings?.code_execution ?? true;
+
   const body = {
     model: UPSTREAM_MODEL,
     input: publicBody.input,
     stream: publicBody.stream,
     store: true,
     system_instruction: SYSTEM_INSTRUCTION,
-    tools: [{ type: "code_execution" }],
     generation_config: {
-      thinking_level: "high",
+      thinking_level: thinkingLevel,
       thinking_summaries: "auto"
     }
   };
+
+  if (codeExecution) {
+    body.tools = [{ type: "code_execution" }];
+  }
 
   if (publicBody.previous_interaction_id) {
     body.previous_interaction_id = publicBody.previous_interaction_id;

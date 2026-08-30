@@ -9,8 +9,14 @@ const encoder = new TextEncoder();
 const TOP_LEVEL_FIELDS = new Set([
   "input",
   "stream",
-  "previous_interaction_id"
+  "previous_interaction_id",
+  "generation_settings"
 ]);
+const GENERATION_SETTINGS_FIELDS = new Set([
+  "thinking_level",
+  "code_execution"
+]);
+const THINKING_LEVELS = new Set(["minimal", "low", "medium", "high"]);
 const TEXT_FIELDS = new Set(["type", "text"]);
 const IMAGE_FIELDS = new Set([
   "type",
@@ -65,6 +71,40 @@ function validateTextPart(part) {
 
   if (utf8Length(part.text) > MAX_TEXT_BYTES) {
     fail(413, "text_too_large", "The text input is too large.");
+  }
+}
+
+function validateGenerationSettings(settings) {
+  if (!isRecord(settings)) {
+    fail(400, "invalid_generation_settings", "The generation settings must be an object.");
+  }
+
+  assertExactFields(
+    settings,
+    GENERATION_SETTINGS_FIELDS,
+    "The generation settings"
+  );
+
+  if (
+    Object.hasOwn(settings, "thinking_level") &&
+    !THINKING_LEVELS.has(settings.thinking_level)
+  ) {
+    fail(
+      400,
+      "invalid_generation_settings",
+      "The thinking level must be minimal, low, medium, or high."
+    );
+  }
+
+  if (
+    Object.hasOwn(settings, "code_execution") &&
+    typeof settings.code_execution !== "boolean"
+  ) {
+    fail(
+      400,
+      "invalid_generation_settings",
+      "The code execution setting must be a boolean."
+    );
   }
 }
 
@@ -126,6 +166,10 @@ export function validatePublicBody(value) {
 
   if (!Object.hasOwn(value, "stream") || typeof value.stream !== "boolean") {
     fail(400, "invalid_request", "The stream field must be a boolean.");
+  }
+
+  if (Object.hasOwn(value, "generation_settings")) {
+    validateGenerationSettings(value.generation_settings);
   }
 
   if (value.input.length < 1 || value.input.length > 2) {

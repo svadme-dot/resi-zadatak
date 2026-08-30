@@ -294,6 +294,122 @@ async function frontendAutoScrollControllerFixture() {
   };
 }
 
+async function frontendGenerationSettingsFixture(initialStorage = {}) {
+  const source = await frontendSource();
+  const helpersSource = sourceSlice(
+    source,
+    '  function normalizeGenerationSettings',
+    '  function openSettings'
+  );
+
+  const makeButton = dataset => ({
+    dataset,
+    disabled: false,
+    attributes: {},
+    setAttribute(name, value) {
+      this.attributes[name] = String(value);
+    }
+  });
+  const thinkingLevelButtons = ['minimal', 'low', 'medium', 'high']
+    .map(thinkingLevel => makeButton({ thinkingLevel }));
+  const codeExecutionButtons = [false, true]
+    .map(codeExecution => makeButton({ codeExecution: String(codeExecution) }));
+  const storageMap = new Map(Object.entries(initialStorage));
+  const localStorage = {
+    getItem(key) {
+      return storageMap.has(key) ? storageMap.get(key) : null;
+    },
+    setItem(key, value) {
+      storageMap.set(key, String(value));
+    }
+  };
+  const chats = [
+    {
+      interactionId: 'saved-interaction',
+      interactionProfileId: 'gateway:1'
+    }
+  ];
+  let persistCount = 0;
+  const persistChats = () => {
+    persistCount += 1;
+  };
+
+  const createFixture = new Function(
+    'localStorage',
+    'thinkingLevelButtons',
+    'codeExecutionButtons',
+    'chats',
+    'persistChats',
+    [
+      '"use strict";',
+      'const GENERATION_SETTINGS_STORAGE = "matematika_generation_settings_v1";',
+      'const THINKING_LEVELS = Object.freeze(["minimal", "low", "medium", "high"]);',
+      'const DEFAULT_GENERATION_SETTINGS = Object.freeze({ thinkingLevel: "high", codeExecution: true });',
+      'let busy = false;',
+      'let sendPreparing = false;',
+      'let generationSettings;',
+      'let previousInteractionId = "active-interaction";',
+      'let previousInteractionProfileId = "gateway:1";',
+      helpersSource,
+      'generationSettings = loadGenerationSettings();',
+      'syncGenerationSettingsControls();',
+      'return {',
+      '  applyGenerationSettings,',
+      '  generationSettingsForRequest,',
+      '  loadGenerationSettings,',
+      '  get settings() { return { ...generationSettings }; },',
+      '  get previousInteractionId() { return previousInteractionId; },',
+      '  get previousInteractionProfileId() { return previousInteractionProfileId; },',
+      '  setBusy(value) { busy = Boolean(value); syncGenerationSettingsControls(); }',
+      '};'
+    ].join('\n')
+  );
+
+  return {
+    chats,
+    codeExecutionButtons,
+    controller: createFixture(
+      localStorage,
+      thinkingLevelButtons,
+      codeExecutionButtons,
+      chats,
+      persistChats
+    ),
+    get persistCount() {
+      return persistCount;
+    },
+    storageMap,
+    thinkingLevelButtons
+  };
+}
+
+async function frontendLocalGenerationBuilder() {
+  const source = await frontendSource();
+  const normalizeSource = sourceSlice(
+    source,
+    '  function normalizeGenerationSettings',
+    '  function loadGenerationSettings'
+  );
+  const builderSource = sourceSlice(
+    source,
+    '  function buildLocalInteractionRequest',
+    '  function extractContentText'
+  );
+
+  return new Function(
+    [
+      '"use strict";',
+      'const THINKING_LEVELS = Object.freeze(["minimal", "low", "medium", "high"]);',
+      'const DEFAULT_GENERATION_SETTINGS = Object.freeze({ thinkingLevel: "high", codeExecution: true });',
+      'const LOCAL_UPSTREAM_MODEL = "gemini-3.6-flash";',
+      'const SYSTEM_INSTRUCTION = "fixed-test-instruction";',
+      normalizeSource,
+      builderSource,
+      'return buildLocalInteractionRequest;'
+    ].join('\n')
+  )();
+}
+
 function accidentalSchoolFence(marker = '```', language = '') {
   return [
     marker + language,
@@ -420,6 +536,149 @@ test('smart autoscroll honors a 5px scrollbar move and pauses while touch is hel
   fixture.setRootScrollTop(850);
   controller.syncAutoScrollFromPosition(root);
   assert.equal(controller.pinned, false);
+});
+
+test('generation settings preserve legacy defaults, persist, and never touch local API keys', async () => {
+  const apiStorageKey = 'matematika_local_api_fallback_v1';
+  const apiStorageValue = JSON.stringify([
+    { key: 'existing-local-api-key-1' },
+    { key: 'existing-local-api-key-2' }
+  ]);
+  const fixture = await frontendGenerationSettingsFixture({
+    [apiStorageKey]: apiStorageValue
+  });
+
+  assert.deepEqual(fixture.controller.settings, {
+    thinkingLevel: 'high',
+    codeExecution: true
+  });
+  assert.equal(
+    fixture.thinkingLevelButtons.find(
+      button => button.dataset.thinkingLevel === 'high'
+    ).attributes['aria-pressed'],
+    'true'
+  );
+  assert.equal(
+    fixture.codeExecutionButtons.find(
+      button => button.dataset.codeExecution === 'true'
+    ).attributes['aria-pressed'],
+    'true'
+  );
+
+  assert.equal(
+    fixture.controller.applyGenerationSettings({
+      thinkingLevel: 'low',
+      codeExecution: false
+    }),
+    true
+  );
+  assert.deepEqual(fixture.controller.settings, {
+    thinkingLevel: 'low',
+    codeExecution: false
+  });
+  assert.deepEqual(
+    JSON.parse(
+      fixture.storageMap.get('matematika_generation_settings_v1')
+    ),
+    { thinkingLevel: 'low', codeExecution: false }
+  );
+  assert.equal(fixture.storageMap.get(apiStorageKey), apiStorageValue);
+  assert.equal(fixture.controller.previousInteractionId, '');
+  assert.equal(fixture.controller.previousInteractionProfileId, '');
+  assert.equal(fixture.chats[0].interactionId, '');
+  assert.equal(fixture.chats[0].interactionProfileId, '');
+  assert.equal(fixture.persistCount, 1);
+
+  const reloaded = await frontendGenerationSettingsFixture(
+    Object.fromEntries(fixture.storageMap)
+  );
+  assert.deepEqual(reloaded.controller.settings, {
+    thinkingLevel: 'low',
+    codeExecution: false
+  });
+  assert.deepEqual(
+    reloaded.controller.generationSettingsForRequest(
+      reloaded.controller.settings
+    ),
+    { thinking_level: 'low', code_execution: false }
+  );
+});
+
+test('generation settings fail safely and cannot change during a live answer', async () => {
+  for (const stored of [
+    '{',
+    'null',
+    '[]',
+    JSON.stringify({ thinkingLevel: 'HIGH', codeExecution: 'false' })
+  ]) {
+    const fixture = await frontendGenerationSettingsFixture({
+      matematika_generation_settings_v1: stored
+    });
+    assert.deepEqual(fixture.controller.settings, {
+      thinkingLevel: 'high',
+      codeExecution: true
+    });
+  }
+
+  const fixture = await frontendGenerationSettingsFixture();
+  for (const thinkingLevel of ['minimal', 'low', 'medium', 'high']) {
+    fixture.controller.applyGenerationSettings({
+      thinkingLevel,
+      codeExecution: true
+    });
+    assert.equal(fixture.controller.settings.thinkingLevel, thinkingLevel);
+  }
+
+  fixture.controller.setBusy(true);
+  assert.equal(
+    fixture.controller.applyGenerationSettings({
+      thinkingLevel: 'minimal',
+      codeExecution: false
+    }),
+    false
+  );
+  assert.deepEqual(fixture.controller.settings, {
+    thinkingLevel: 'high',
+    codeExecution: true
+  });
+  assert.equal(
+    fixture.thinkingLevelButtons.every(button => button.disabled),
+    true
+  );
+});
+
+test('local generation builder applies all thinking levels and cleanly omits code execution', async () => {
+  const buildLocalInteractionRequest = await frontendLocalGenerationBuilder();
+  const base = {
+    input: [{ type: 'text', text: 'Test' }],
+    stream: true
+  };
+
+  for (const thinking_level of ['minimal', 'low', 'medium', 'high']) {
+    const withCode = buildLocalInteractionRequest({
+      ...base,
+      generation_settings: {
+        thinking_level,
+        code_execution: true
+      }
+    });
+    assert.deepEqual(withCode.generation_config, {
+      thinking_level,
+      thinking_summaries: 'auto'
+    });
+    assert.deepEqual(withCode.tools, [{ type: 'code_execution' }]);
+    assert.equal(withCode.model, MODEL);
+
+    const withoutCode = buildLocalInteractionRequest({
+      ...base,
+      generation_settings: {
+        thinking_level,
+        code_execution: false
+      }
+    });
+    assert.equal(Object.hasOwn(withoutCode, 'tools'), false);
+    assert.equal(withoutCode.generation_config.thinking_level, thinking_level);
+  }
 });
 
 test('renderer repairs accidental fenced and indented school explanations', async () => {
@@ -1041,19 +1300,37 @@ test('file import replaces all slots and local profiles fully replace gateway se
   const selectProfiles = localProfiles => new Function(
     'API_SLOT_ORDER',
     'getConfiguredLocalApiProfiles',
+    'generationSettingsSnapshot',
     selectionSource + '\nreturn getApiProfiles();'
   )(
     Object.freeze([1, 2, 3, 4]),
-    () => localProfiles
+    () => localProfiles,
+    () => Object.freeze({ thinkingLevel: 'high', codeExecution: true })
   );
   const sparseLocal = [applied[0][1], applied[0][3]].map((profile, index) => ({
     ...profile,
     key: 'sparse-local-key-' + index
   }));
-  assert.deepEqual(selectProfiles(sparseLocal), sparseLocal);
+  assert.deepEqual(
+    selectProfiles(sparseLocal),
+    sparseLocal.map(profile => ({
+      ...profile,
+      generationSettings: {
+        thinkingLevel: 'high',
+        codeExecution: true
+      }
+    }))
+  );
   assert.deepEqual(
     selectProfiles([]),
-    [1, 2, 3, 4].map(slot => ({ transport: 'gateway', slot }))
+    [1, 2, 3, 4].map(slot => ({
+      transport: 'gateway',
+      slot,
+      generationSettings: {
+        thinkingLevel: 'high',
+        codeExecution: true
+      }
+    }))
   );
 
   const profileIdSource = sourceSlice(

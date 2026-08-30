@@ -1561,8 +1561,40 @@ export function createHarnessServer() {
         const browserAllowedFields = new Set([
           'input',
           'stream',
-          'previous_interaction_id'
+          'previous_interaction_id',
+          'generation_settings'
         ]);
+        const browserGenerationSettings =
+          incomingBody?.generation_settings;
+        const generationSettingKeys =
+          browserGenerationSettings &&
+          typeof browserGenerationSettings === 'object' &&
+          !Array.isArray(browserGenerationSettings)
+            ? Object.keys(browserGenerationSettings)
+            : [];
+        const generationSettingsValid =
+          browserGenerationSettings === undefined || (
+            browserGenerationSettings !== null &&
+            typeof browserGenerationSettings === 'object' &&
+            !Array.isArray(browserGenerationSettings) &&
+            generationSettingKeys.every(key =>
+              ['thinking_level', 'code_execution'].includes(key)
+            ) &&
+            (
+              !Object.hasOwn(browserGenerationSettings, 'thinking_level') ||
+              ['minimal', 'low', 'medium', 'high'].includes(
+                browserGenerationSettings.thinking_level
+              )
+            ) &&
+            (
+              !Object.hasOwn(browserGenerationSettings, 'code_execution') ||
+              typeof browserGenerationSettings.code_execution === 'boolean'
+            )
+          );
+        const gatewayThinkingLevel =
+          browserGenerationSettings?.thinking_level ?? 'high';
+        const gatewayCodeExecution =
+          browserGenerationSettings?.code_execution ?? true;
         const browserContract = isGateway
           ? {
               sentNoApiKey:
@@ -1574,9 +1606,14 @@ export function createHarnessServer() {
                 !Object.hasOwn(incomingBody, 'generation_config'),
               usedAllowedGatewayShape:
                 /^[1-4]$/.test(slot) &&
+                generationSettingsValid &&
                 Object.keys(incomingBody).every(key =>
                   browserAllowedFields.has(key)
-                )
+                ),
+              generationSettings: {
+                thinking_level: gatewayThinkingLevel,
+                code_execution: gatewayCodeExecution
+              }
             }
           : isLocal
             ? {
@@ -1591,19 +1628,26 @@ export function createHarnessServer() {
                   incomingBody?.generation_config?.thinking_summaries === 'auto'
               }
             : null;
-        const body = isGateway
-          ? {
-              ...incomingBody,
-              model: MODEL,
-              store: true,
-              system_instruction: 'Deterministic fixed server-side instruction.',
-              tools: [{ type: 'code_execution' }],
-              generation_config: {
-                thinking_level: 'high',
-                thinking_summaries: 'auto'
-              }
+        let body = incomingBody;
+        if (isGateway) {
+          const {
+            generation_settings: _generationSettings,
+            ...gatewayPublicBody
+          } = incomingBody;
+          body = {
+            ...gatewayPublicBody,
+            model: MODEL,
+            store: true,
+            system_instruction: 'Deterministic fixed server-side instruction.',
+            generation_config: {
+              thinking_level: gatewayThinkingLevel,
+              thinking_summaries: 'auto'
             }
-          : incomingBody;
+          };
+          if (gatewayCodeExecution) {
+            body.tools = [{ type: 'code_execution' }];
+          }
+        }
         const run = url.searchParams.get('run') || '';
         const scenarioRequestIndex = requestLog.filter(record =>
           record.kind === 'solve' &&

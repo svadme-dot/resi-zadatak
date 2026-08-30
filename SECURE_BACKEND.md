@@ -10,7 +10,7 @@ završne statičke, E2E i produkcijske provere pre objavljivanja.
 - Worker name: `resi-zadatak-api`
 - Produkcijski endpoint:
   `https://resi-zadatak-api.vasilije-demonjic.workers.dev/v1/interactions`
-- Proverena Worker verzija: `4d2a6340-c078-4936-a07e-0746ecb1cfbe`
+- Proverena Worker verzija: `ae9315e1-7cd3-414c-98d9-f29e1cb2bc85`
 - Lokalni restore tag: `backup-before-secure-api-backend`
 - Restore tag pre opcione lokalne rezerve:
   `backup-before-local-api-fallback`
@@ -32,10 +32,13 @@ Kada je u Settings sačuvan bar jedan lokalni ključ:
 `GitHub Pages -> direktni browser API poziv`
 
 Worker koristi jedan SQLite Durable Object `RateCoordinator` kao globalni,
-atomarni koordinator limita. Browser šalje samo sadržaj zadatka i neutralni broj
-slota 1-4. Worker mapira slot na server-side secret, fiksira postojeći endpoint,
-model, system prompt, `code_execution`, high thinking i streaming podešavanja,
-pa tek nakon uspešne rezervacije šalje jedan upstream poziv.
+atomarni koordinator limita. Browser šalje samo sadržaj zadatka, neutralni broj
+slota 1-4 i dva strogo validirana podešavanja: thinking nivo i boolean za
+`code_execution`. Worker mapira slot na server-side secret, fiksira postojeći
+endpoint, model, system prompt, thinking sažetke i streaming, a dozvoljena dva
+podešavanja prevodi u upstream konfiguraciju tek nakon uspešne rezervacije.
+Stari klijenti koji ne pošalju nova polja ostaju tačno na `high` thinking-u i
+uključenom `code_execution` režimu.
 
 Frontend zadržava postojeću retry/fallback state mašinu kako bi thinking,
 parcijalni odgovor, Stop i `previous_interaction_id` nastavili da rade isto.
@@ -49,6 +52,15 @@ slotovi učestvuju u tom zahtevu i Cloudflare/health se uopšte ne pozivaju. Ako
 nema nijednog lokalnog ključa ili je lokalni storage izgubljen/nedostupan, samo
 četiri neutralna Worker slota učestvuju. Ne postoji automatski prelaz između
 transporta usred istog zahteva.
+
+Settings odvojeno pamti i način generisanja u
+`matematika_generation_settings_v1`. Dozvoljeni thinking nivoi su samo
+`minimal`, `low`, `medium` i `high`, a `code_execution` je strogi boolean.
+Storage lokalnih API ključeva se pri promeni ovih opcija ne čita niti prepisuje.
+Model ostaje fiksan, Google Search alat se nikada ne dodaje, a svaka slika i
+dalje nosi fiksno `resolution: "high"`. Promena podešavanja poništava samo stare
+server-side continuation ID-jeve; istorija razgovora ostaje sačuvana i po
+potrebi obnavlja kontekst lokalno.
 
 Browser nikada ne dobija vrednost server-side Worker ključa. Lokalni ključevi
 postoje u browseru isključivo zato što ih je vlasnik ručno uneo ili lokalno
@@ -177,7 +189,8 @@ prekida ne prelazi sa lokalnog transporta na Cloudflare niti obrnuto.
 
 - samo `POST`/`OPTIONS` na `/v1/interactions` i neutralni `GET /health`;
 - tačan JSON ugovor, najviše jedna JPEG slika, 3 MiB body i 2 MiB image limit;
-- nema arbitrary URL-a, endpointa, modela, prompta ili alata iz browsera;
+- nema arbitrary URL-a, endpointa, modela, prompta ili sirovih alata/config-a
+  iz browsera; prihvataju se samo dva uska generation polja;
 - CORS dozvoljava samo `https://svadme-dot.github.io`;
 - secrets se dodaju samo u upstream header i ne ulaze u javni odgovor/log;
 - upstream greške, metadata, SSE komentari i provider/model oznake se

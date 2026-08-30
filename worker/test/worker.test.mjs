@@ -200,6 +200,49 @@ test("gateway injects the exact fixed model policy and sends only the selected s
   assert.doesNotMatch(await response.text(), /canary-secret-slot/i);
 });
 
+test("gateway applies only the two validated generation settings while policy stays fixed", async () => {
+  const calls = [];
+  const env = makeEnv();
+
+  for (const generation_settings of [
+    { thinking_level: "minimal", code_execution: false },
+    { thinking_level: "medium", code_execution: true }
+  ]) {
+    const response = await handleRequest(
+      makeRequest({
+        body: validPublicBody({ stream: false, generation_settings })
+      }),
+      env,
+      {},
+      {
+        async fetchImpl(_url, init) {
+          calls.push(JSON.parse(init.body));
+          return syncSuccess();
+        }
+      }
+    );
+    assert.equal(response.status, 200);
+  }
+
+  assert.equal(calls.length, 2);
+  for (const body of calls) {
+    assert.equal(body.model, UPSTREAM_MODEL);
+    assert.equal(body.store, true);
+    assert.equal(body.system_instruction, SYSTEM_INSTRUCTION);
+    assert.equal(body.generation_config.thinking_summaries, "auto");
+    assert.equal(body.generation_settings, undefined);
+    assert.equal(body.grounding, undefined);
+  }
+
+  assert.equal(calls[0].generation_config.thinking_level, "minimal");
+  assert.equal(Object.hasOwn(calls[0], "tools"), false);
+  assert.deepEqual(calls[1].generation_config, {
+    thinking_level: "medium",
+    thinking_summaries: "auto"
+  });
+  assert.deepEqual(calls[1].tools, [{ type: "code_execution" }]);
+});
+
 test("outbound fetch is invoked without an options-object receiver", async () => {
   let receiver = "not-called";
   async function strictFetch() {
@@ -219,7 +262,7 @@ test("outbound fetch is invoked without an options-object receiver", async () =>
   assertHealthyGateway(response);
 });
 
-test("browser model/key/config injection and credential headers are rejected before reservation", async () => {
+test("browser policy injection and credential headers are rejected before reservation", async () => {
   let upstreamCalls = 0;
   const rate = makeRateBinding(() => 1_000);
   const env = makeEnv({ RATE_COORDINATOR: rate });
@@ -227,7 +270,26 @@ test("browser model/key/config injection and credential headers are rejected bef
   for (const body of [
     { ...validPublicBody(), model: "attacker-model" },
     { ...validPublicBody(), api_key: "browser-key" },
-    { ...validPublicBody(), upstream_url: "https://evil.example" }
+    { ...validPublicBody(), upstream_url: "https://evil.example" },
+    { ...validPublicBody(), tools: [{ type: "browser" }] },
+    { ...validPublicBody(), generation_config: { thinking_level: "minimal" } },
+    { ...validPublicBody(), grounding: true },
+    { ...validPublicBody(), grounding_with_google_search: true },
+    {
+      ...validPublicBody(),
+      generation_settings: {
+        thinking_level: "low",
+        tools: [{ type: "browser" }]
+      }
+    },
+    {
+      ...validPublicBody(),
+      generation_settings: { model: "attacker-model" }
+    },
+    {
+      ...validPublicBody(),
+      generation_settings: { code_execution: "false" }
+    }
   ]) {
     const response = await handleRequest(
       makeRequest({ body }),

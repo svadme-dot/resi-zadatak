@@ -1561,6 +1561,104 @@ window.MathJax = {
     color:#f5f8ff;
   }
 
+  .generationSettings{
+    margin-top:14px;
+    border:1px solid #293447;
+    border-radius:16px;
+    overflow:hidden;
+  }
+  .generationSettingsHeader{
+    padding:12px 13px 10px;
+    border-bottom:1px solid #293447;
+  }
+  .generationSettingsHeader strong{
+    display:block;
+    color:#eaf0f8;
+    font-size:13px;
+  }
+  .generationSettingsHeader span{
+    display:block;
+    margin-top:3px;
+    color:#7f8da2;
+    font-size:10px;
+    line-height:1.4;
+  }
+  .generationSettingRow{
+    padding:12px 13px;
+    border-bottom:1px solid #293447;
+  }
+  .generationSettingLabel{
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+    margin-bottom:9px;
+  }
+  .generationSettingLabel strong{
+    color:#eaf0f8;
+    font-size:12px;
+  }
+  .generationSettingLabel span{
+    color:#7f8da2;
+    font-size:10px;
+    line-height:1.35;
+  }
+  .generationSwitch{
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:3px;
+    padding:3px;
+    border:1px solid #2c374a;
+    border-radius:12px;
+    background:#0e141f;
+  }
+  .generationSwitch.binary{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .generationOption{
+    min-width:0;
+    min-height:42px;
+    border:0;
+    border-radius:9px;
+    background:transparent;
+    color:#8e9cb0;
+    font-size:10px;
+    font-weight:760;
+    padding:0 5px;
+  }
+  .generationOption:focus-visible{
+    outline:2px solid var(--accent);
+    outline-offset:2px;
+  }
+  .generationOption[aria-pressed="true"]{
+    background:#26344b;
+    color:#f5f8ff;
+  }
+  .generationOption:disabled{
+    opacity:.55;
+    cursor:default;
+  }
+  .generationFixedGrid{
+    padding:3px 13px;
+  }
+  .generationFixedRow{
+    min-height:37px;
+    display:flex;
+    align-items:center;
+    gap:12px;
+    border-bottom:1px solid rgba(255,255,255,.055);
+  }
+  .generationFixedRow:last-child{border-bottom:0}
+  .generationFixedRow span{
+    flex:1;
+    color:#7f8da2;
+    font-size:10px;
+  }
+  .generationFixedRow strong{
+    color:#cbd5e4;
+    font-size:10px;
+    text-align:right;
+  }
+
   .historyBack{
     display:none;
     height:38px;
@@ -1808,29 +1906,45 @@ window.MathJax = {
 
   html[data-theme="light"] .settingsInfoGrid,
   html[data-theme="light"] .settingsInfoRow,
-  html[data-theme="light"] .themeSetting{
+  html[data-theme="light"] .themeSetting,
+  html[data-theme="light"] .generationSettings,
+  html[data-theme="light"] .generationSettingsHeader,
+  html[data-theme="light"] .generationSettingRow{
     border-color:#dce2eb;
   }
 
   html[data-theme="light"] .settingsInfoRow strong,
-  html[data-theme="light"] .themeSettingLabel strong{color:#263247}
+  html[data-theme="light"] .themeSettingLabel strong,
+  html[data-theme="light"] .generationSettingsHeader strong,
+  html[data-theme="light"] .generationSettingLabel strong{color:#263247}
 
   html[data-theme="light"] .settingsInfoRow span,
   html[data-theme="light"] .themeSettingLabel span,
+  html[data-theme="light"] .generationSettingsHeader span,
+  html[data-theme="light"] .generationSettingLabel span,
+  html[data-theme="light"] .generationFixedRow span,
   html[data-theme="light"] .settingsAbout{color:#6d7a8e}
 
-  html[data-theme="light"] .themeSwitch{
+  html[data-theme="light"] .themeSwitch,
+  html[data-theme="light"] .generationSwitch{
     border-color:#d7dee8;
     background:#eef2f7;
   }
 
-  html[data-theme="light"] .themeOption{color:#65748a}
+  html[data-theme="light"] .themeOption,
+  html[data-theme="light"] .generationOption{color:#65748a}
 
-  html[data-theme="light"] .themeOption[aria-pressed="true"]{
+  html[data-theme="light"] .themeOption[aria-pressed="true"],
+  html[data-theme="light"] .generationOption[aria-pressed="true"]{
     background:#ffffff;
     color:#1e2b40;
     box-shadow:0 1px 5px rgba(31,44,67,.12);
   }
+
+  html[data-theme="light"] .generationFixedRow{
+    border-bottom-color:rgba(37,49,72,.08);
+  }
+  html[data-theme="light"] .generationFixedRow strong{color:#425068}
 
   html[data-theme="light"] .settingsAdvancedBtn{
     border-color:#cfdbea;
@@ -2539,6 +2653,43 @@ window.MathJax = {
       </div>
     </div>
 
+    <section class="generationSettings" aria-labelledby="generationSettingsTitle">
+      <div class="generationSettingsHeader">
+        <strong id="generationSettingsTitle">AI odgovor</strong>
+        <span>Promene se čuvaju na ovom uređaju. Dosadašnje podešavanje je High + uključeno izvršavanje koda.</span>
+      </div>
+
+      <div class="generationSettingRow">
+        <div class="generationSettingLabel">
+          <strong>Dubina razmišljanja</strong>
+          <span>Veći nivo daje temeljniji odgovor, ali može trajati duže.</span>
+        </div>
+        <div class="generationSwitch" role="group" aria-label="Dubina razmišljanja">
+          <button id="thinkingMinimalBtn" class="generationOption" type="button" data-thinking-level="minimal" aria-pressed="false">Minimal</button>
+          <button id="thinkingLowBtn" class="generationOption" type="button" data-thinking-level="low" aria-pressed="false">Low</button>
+          <button id="thinkingMediumBtn" class="generationOption" type="button" data-thinking-level="medium" aria-pressed="false">Medium</button>
+          <button id="thinkingHighBtn" class="generationOption" type="button" data-thinking-level="high" aria-pressed="true">High</button>
+        </div>
+      </div>
+
+      <div class="generationSettingRow">
+        <div class="generationSettingLabel">
+          <strong>Code Execution</strong>
+          <span>Pomaže pri složenijim računima. Uključeno je dosadašnje podešavanje.</span>
+        </div>
+        <div class="generationSwitch binary" role="group" aria-label="Izvršavanje koda">
+          <button id="codeExecutionOffBtn" class="generationOption" type="button" data-code-execution="false" aria-pressed="false">Isključeno</button>
+          <button id="codeExecutionOnBtn" class="generationOption" type="button" data-code-execution="true" aria-pressed="true">Uključeno</button>
+        </div>
+      </div>
+
+      <div class="generationFixedGrid" aria-label="Fiksna AI podešavanja">
+        <div class="generationFixedRow"><span>Model</span><strong>3.6 Flash · fiksno</strong></div>
+        <div class="generationFixedRow"><span>Internet pretraga</span><strong>Isključena · fiksno</strong></div>
+        <div class="generationFixedRow"><span>Obrada slike</span><strong>High · fiksno</strong></div>
+      </div>
+    </section>
+
     <p class="settingsAbout">
       Aplikacija rešava zadatke korak po korak, sa prikazom razmišljanja,
       matematičkim formulama, istorijom razgovora i podrškom za kameru i galeriju.
@@ -2654,6 +2805,18 @@ window.MathJax = {
   const CHAT_ZOOM_STORAGE = "matematika_chat_zoom_v2";
   const THEME_STORAGE = "matematika_theme_v1";
   const USED_IMAGES_GRID_STORAGE = "matematika_used_images_grid_v1";
+  const GENERATION_SETTINGS_STORAGE =
+    "matematika_generation_settings_v1";
+  const THINKING_LEVELS = Object.freeze([
+    "minimal",
+    "low",
+    "medium",
+    "high"
+  ]);
+  const DEFAULT_GENERATION_SETTINGS = Object.freeze({
+    thinkingLevel: "high",
+    codeExecution: true
+  });
 
   const IMAGE_DB_NAME = "matematika_chat_images_v1";
   const IMAGE_DB_STORE = "images";
@@ -2710,10 +2873,17 @@ window.MathJax = {
   );
   const localKeysFileInput = el("localKeysFile");
   const localImportStatus = el("localImportStatus");
+  const thinkingLevelButtons = Array.from(
+    document.querySelectorAll("[data-thinking-level]")
+  );
+  const codeExecutionButtons = Array.from(
+    document.querySelectorAll("[data-code-execution]")
+  );
 
   let busy = false;
   let sendPreparing = false;
   let localApiImportInProgress = false;
+  let generationSettings = loadGenerationSettings();
   let activeSolveController = null;
   let userStopRequested = false;
   let stopButtonHideTimer = null;
@@ -3829,8 +3999,123 @@ window.MathJax = {
     applyTheme(getSavedTheme(), false);
   }
 
+  function normalizeGenerationSettings(raw) {
+    const value =
+      raw && typeof raw === "object" && !Array.isArray(raw)
+        ? raw
+        : {};
+
+    return {
+      thinkingLevel: THINKING_LEVELS.includes(value.thinkingLevel)
+        ? value.thinkingLevel
+        : DEFAULT_GENERATION_SETTINGS.thinkingLevel,
+      codeExecution: typeof value.codeExecution === "boolean"
+        ? value.codeExecution
+        : DEFAULT_GENERATION_SETTINGS.codeExecution
+    };
+  }
+
+  function loadGenerationSettings() {
+    try {
+      const stored = localStorage.getItem(GENERATION_SETTINGS_STORAGE);
+      if (stored === null) {
+        return { ...DEFAULT_GENERATION_SETTINGS };
+      }
+      return normalizeGenerationSettings(JSON.parse(stored));
+    } catch {
+      return { ...DEFAULT_GENERATION_SETTINGS };
+    }
+  }
+
+  function saveGenerationSettings(settings) {
+    const normalized = normalizeGenerationSettings(settings);
+    generationSettings = normalized;
+
+    try {
+      localStorage.setItem(
+        GENERATION_SETTINGS_STORAGE,
+        JSON.stringify(normalized)
+      );
+    } catch {}
+
+    return normalized;
+  }
+
+  function generationSettingsSnapshot() {
+    return Object.freeze({
+      ...normalizeGenerationSettings(generationSettings)
+    });
+  }
+
+  function generationSettingsForRequest(settings) {
+    const normalized = normalizeGenerationSettings(settings);
+    return {
+      thinking_level: normalized.thinkingLevel,
+      code_execution: normalized.codeExecution
+    };
+  }
+
+  function clearGenerationInteractionContinuations() {
+    previousInteractionId = "";
+    previousInteractionProfileId = "";
+
+    let changed = false;
+    for (const chat of chats) {
+      if (chat.interactionId || chat.interactionProfileId) {
+        chat.interactionId = "";
+        chat.interactionProfileId = "";
+        changed = true;
+      }
+    }
+
+    if (changed) persistChats();
+  }
+
+  function syncGenerationSettingsControls() {
+    const normalized = normalizeGenerationSettings(generationSettings);
+    const disabled = busy || sendPreparing;
+
+    for (const button of thinkingLevelButtons) {
+      button.setAttribute(
+        "aria-pressed",
+        button.dataset.thinkingLevel === normalized.thinkingLevel
+          ? "true"
+          : "false"
+      );
+      button.disabled = disabled;
+    }
+
+    for (const button of codeExecutionButtons) {
+      const enabled = button.dataset.codeExecution === "true";
+      button.setAttribute(
+        "aria-pressed",
+        enabled === normalized.codeExecution ? "true" : "false"
+      );
+      button.disabled = disabled;
+    }
+  }
+
+  function applyGenerationSettings(nextSettings) {
+    if (busy || sendPreparing) {
+      syncGenerationSettingsControls();
+      return false;
+    }
+
+    const previous = normalizeGenerationSettings(generationSettings);
+    const next = normalizeGenerationSettings(nextSettings);
+    const changed =
+      previous.thinkingLevel !== next.thinkingLevel ||
+      previous.codeExecution !== next.codeExecution;
+
+    saveGenerationSettings(next);
+    if (changed) clearGenerationInteractionContinuations();
+    syncGenerationSettingsControls();
+    return true;
+  }
+
   function openSettings() {
     syncThemeButtons();
+    syncGenerationSettingsControls();
     settingsOverlay.classList.add("show");
   }
 
@@ -4054,13 +4339,22 @@ window.MathJax = {
   }
 
   function getApiProfiles() {
+    const requestGenerationSettings = generationSettingsSnapshot();
+    const withGenerationSettings = profile => ({
+      ...profile,
+      generationSettings: requestGenerationSettings
+    });
     const localProfiles = getConfiguredLocalApiProfiles();
-    if (localProfiles.length) return localProfiles;
+    if (localProfiles.length) {
+      return localProfiles.map(withGenerationSettings);
+    }
 
-    return API_SLOT_ORDER.map(slot => ({
-      transport: "gateway",
-      slot
-    }));
+    return API_SLOT_ORDER.map(slot =>
+      withGenerationSettings({
+        transport: "gateway",
+        slot
+      })
+    );
   }
 
   function apiProfileId(profile) {
@@ -6310,7 +6604,8 @@ window.MathJax = {
     text,
     img,
     usePreviousId = true,
-    excludeTrailingUser = false
+    excludeTrailingUser = false,
+    requestGenerationSettings = generationSettings
   ) {
     const body = {
       input: buildInteractionInput(
@@ -6319,7 +6614,9 @@ window.MathJax = {
         !usePreviousId && history.length > 0,
         excludeTrailingUser
       ),
-      stream: true
+      stream: true,
+      generation_settings:
+        generationSettingsForRequest(requestGenerationSettings)
     };
 
     if (usePreviousId && previousInteractionId) {
@@ -6330,18 +6627,27 @@ window.MathJax = {
   }
 
   function buildLocalInteractionRequest(publicBody) {
+    const requestSettings = normalizeGenerationSettings({
+      thinkingLevel:
+        publicBody.generation_settings?.thinking_level,
+      codeExecution:
+        publicBody.generation_settings?.code_execution
+    });
     const body = {
       model: LOCAL_UPSTREAM_MODEL,
       input: publicBody.input,
       stream: publicBody.stream,
       store: true,
       system_instruction: SYSTEM_INSTRUCTION,
-      tools: [{ type: "code_execution" }],
       generation_config: {
-        thinking_level: "high",
+        thinking_level: requestSettings.thinkingLevel,
         thinking_summaries: "auto"
       }
     };
+
+    if (requestSettings.codeExecution) {
+      body.tools = [{ type: "code_execution" }];
+    }
 
     if (publicBody.previous_interaction_id) {
       body.previous_interaction_id =
@@ -7141,7 +7447,8 @@ window.MathJax = {
         text,
         img,
         usePreviousId,
-        excludeTrailingUser
+        excludeTrailingUser,
+        profile.generationSettings
       );
 
     body.stream = false;
@@ -7253,7 +7560,8 @@ window.MathJax = {
             text,
             img,
             usePreviousId,
-            excludeTrailingUser
+            excludeTrailingUser,
+            profile.generationSettings
           );
 
         return await streamInteraction(body, profile, signal);
@@ -7593,6 +7901,7 @@ window.MathJax = {
       previewWrap.classList.remove("show");
 
       busy = true;
+      syncGenerationSettingsControls();
     } catch (err) {
       setStatus(
         err?.message || "Sačuvani zadatak nije mogao da se pripremi.",
@@ -7854,6 +8163,7 @@ window.MathJax = {
       }
     } finally {
       busy = false;
+      syncGenerationSettingsControls();
       sendBtn.disabled = false;
       el("pickImage").disabled = false;
       el("newChat").disabled = false;
@@ -8157,6 +8467,24 @@ window.MathJax = {
   el("themeLightBtn").addEventListener("click", () => {
     applyTheme("light", true);
   });
+
+  for (const button of thinkingLevelButtons) {
+    button.addEventListener("click", () => {
+      applyGenerationSettings({
+        ...generationSettings,
+        thinkingLevel: button.dataset.thinkingLevel
+      });
+    });
+  }
+
+  for (const button of codeExecutionButtons) {
+    button.addEventListener("click", () => {
+      applyGenerationSettings({
+        ...generationSettings,
+        codeExecution: button.dataset.codeExecution === "true"
+      });
+    });
+  }
 
   function openSourceSheet() {
     const active = document.activeElement;

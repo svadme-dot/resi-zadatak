@@ -118,9 +118,10 @@ The Recorded request JSON view preserves each received body and response
 outcome. Solver assertions verify:
 
 - model is exactly gemini-3.6-flash (never an agent alias)
-- thinking_level is high
+- old/default clients use thinking_level high
+- configured clients may use only minimal, low, medium, or high
 - thinking_summaries is auto
-- tools contains exactly one code_execution tool
+- code_execution is either the only tool or tools is omitted when disabled
 - no google_search or grounding configuration exists anywhere in the body
 - an image MIME type and non-empty base64 payload are present
 - the image content item carries resolution: high
