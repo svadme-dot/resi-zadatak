@@ -5,13 +5,13 @@ import { createHarnessServer } from './harness-server.mjs';
 
 const RETRY_PROMPT =
   'E2E ponovni pokušaj: reši jednačinu 2x + 3 = 11.';
-const MODEL = 'gemini-3.6-flash';
+const MODEL = 'gemini-3.8-flash';
 const IMAGE_MODALITY_MESSAGE =
-  'Image input modality is not enabled for models/gemini-3.6-flash-agent';
+  'Image input modality is not enabled for models/gemini-3.8-flash-agent';
 const UNSUPPORTED_IMAGE_PAYLOAD_MESSAGE =
   'Unsupported image format/MIME';
 const HIGH_DEMAND_MESSAGE =
-  'gemini-3.6-flash is currently experiencing high demand, spikes in demand are usually temporary. Please try again later.';
+  'gemini-3.8-flash is currently experiencing high demand, spikes in demand are usually temporary. Please try again later.';
 const EXPECTED_FOUR_PROFILE_ORDER = [
   ['e2e-api-1', MODEL],
   ['e2e-api-2', MODEL],
@@ -310,7 +310,7 @@ async function frontendGenerationSettingsFixture(initialStorage = {}) {
       this.attributes[name] = String(value);
     }
   });
-  const thinkingLevelButtons = ['minimal', 'low', 'medium', 'high']
+  const thinkingLevelButtons = ['low', 'medium', 'high']
     .map(thinkingLevel => makeButton({ thinkingLevel }));
   const codeExecutionButtons = [false, true]
     .map(codeExecution => makeButton({ codeExecution: String(codeExecution) }));
@@ -343,7 +343,7 @@ async function frontendGenerationSettingsFixture(initialStorage = {}) {
     [
       '"use strict";',
       'const GENERATION_SETTINGS_STORAGE = "matematika_generation_settings_v1";',
-      'const THINKING_LEVELS = Object.freeze(["minimal", "low", "medium", "high"]);',
+      sourceSlice(source, '  const THINKING_LEVELS', '  const DEFAULT_GENERATION_SETTINGS'),
       'const DEFAULT_GENERATION_SETTINGS = Object.freeze({ thinkingLevel: "high", codeExecution: true });',
       'let busy = false;',
       'let sendPreparing = false;',
@@ -399,9 +399,9 @@ async function frontendLocalGenerationBuilder() {
   return new Function(
     [
       '"use strict";',
-      'const THINKING_LEVELS = Object.freeze(["minimal", "low", "medium", "high"]);',
+      sourceSlice(source, '  const THINKING_LEVELS', '  const DEFAULT_GENERATION_SETTINGS'),
       'const DEFAULT_GENERATION_SETTINGS = Object.freeze({ thinkingLevel: "high", codeExecution: true });',
-      'const LOCAL_UPSTREAM_MODEL = "gemini-3.6-flash";',
+      sourceSlice(source, '  const LEGACY_PROVIDER_PREFIX', '  const LOCAL_UPSTREAM_API_ROOT'),
       'const SYSTEM_INSTRUCTION = "fixed-test-instruction";',
       normalizeSource,
       builderSource,
@@ -604,6 +604,36 @@ test('generation settings preserve legacy defaults, persist, and never touch loc
   );
 });
 
+test('saved minimal settings migrate to low while preserving keys, code execution, and continuations', async () => {
+  const apiStorageKey = 'matematika_local_api_fallback_v1';
+  const apiStorageValue = '[{"key":"existing-local-api-key"}]';
+  const fixture = await frontendGenerationSettingsFixture({
+    [apiStorageKey]: apiStorageValue,
+    matematika_generation_settings_v1: JSON.stringify({
+      thinkingLevel: 'minimal',
+      codeExecution: false
+    })
+  });
+
+  assert.deepEqual(fixture.controller.settings, {
+    thinkingLevel: 'low',
+    codeExecution: false
+  });
+  assert.equal(
+    fixture.thinkingLevelButtons.find(button => button.dataset.thinkingLevel === 'low')
+      .attributes['aria-pressed'],
+    'true'
+  );
+  assert.deepEqual(
+    fixture.controller.generationSettingsForRequest(fixture.controller.settings),
+    { thinking_level: 'low', code_execution: false }
+  );
+  assert.equal(fixture.storageMap.get(apiStorageKey), apiStorageValue);
+  assert.equal(fixture.controller.previousInteractionId, 'active-interaction');
+  assert.equal(fixture.chats[0].interactionId, 'saved-interaction');
+  assert.equal(fixture.persistCount, 0);
+});
+
 test('generation settings fail safely and cannot change during a live answer', async () => {
   for (const stored of [
     '{',
@@ -621,7 +651,7 @@ test('generation settings fail safely and cannot change during a live answer', a
   }
 
   const fixture = await frontendGenerationSettingsFixture();
-  for (const thinkingLevel of ['minimal', 'low', 'medium', 'high']) {
+  for (const thinkingLevel of ['low', 'medium', 'high']) {
     fixture.controller.applyGenerationSettings({
       thinkingLevel,
       codeExecution: true
@@ -647,7 +677,7 @@ test('generation settings fail safely and cannot change during a live answer', a
   );
 });
 
-test('local generation builder applies all thinking levels and cleanly omits code execution', async () => {
+test('local generation builder uses 3.8 thinking levels, maps legacy minimal, and cleanly omits code execution', async () => {
   const buildLocalInteractionRequest = await frontendLocalGenerationBuilder();
   const base = {
     input: [{ type: 'text', text: 'Test' }],
@@ -663,7 +693,7 @@ test('local generation builder applies all thinking levels and cleanly omits cod
       }
     });
     assert.deepEqual(withCode.generation_config, {
-      thinking_level,
+      thinking_level: thinking_level === 'minimal' ? 'low' : thinking_level,
       thinking_summaries: 'auto'
     });
     assert.deepEqual(withCode.tools, [{ type: 'code_execution' }]);
@@ -677,7 +707,10 @@ test('local generation builder applies all thinking levels and cleanly omits cod
       }
     });
     assert.equal(Object.hasOwn(withoutCode, 'tools'), false);
-    assert.equal(withoutCode.generation_config.thinking_level, thinking_level);
+    assert.equal(
+      withoutCode.generation_config.thinking_level,
+      thinking_level === 'minimal' ? 'low' : thinking_level
+    );
   }
 });
 
@@ -1439,7 +1472,7 @@ test('request oracle rejects an agent alias and media_resolution impostor', asyn
   await withServer(async base => {
     const invalidBody = {
       ...validSolverBody,
-      model: 'gemini-3.6-flash-agent',
+      model: 'gemini-3.8-flash-agent',
       input: validSolverBody.input.map(part =>
         part.type === 'image'
           ? {
@@ -1506,7 +1539,7 @@ test('fallback scenario keeps API 1 at 429 and lets API 2 stream', async () => {
   });
 });
 
-test('fallback follows the exact four-key 3.6 order', async () => {
+test('fallback follows the exact four-key 3.8 order', async () => {
   await withServer(async base => {
     const run = 'four-profile-order';
     const endpoint =
@@ -1714,7 +1747,7 @@ test('failed interaction completion advances without a sync duplicate', async ()
   });
 });
 
-test('thinking-only high demand reaches the fourth 3.6 tuple', async () => {
+test('thinking-only high demand reaches the fourth 3.8 tuple', async () => {
   await withServer(async base => {
     const run = 'thinking-only-high-demand';
     const endpoint =

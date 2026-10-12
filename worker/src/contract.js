@@ -16,6 +16,7 @@ const GENERATION_SETTINGS_FIELDS = new Set([
   "thinking_level",
   "code_execution"
 ]);
+// Keep minimal in the public contract for older clients; config maps it to low.
 const THINKING_LEVELS = new Set(["minimal", "low", "medium", "high"]);
 const TEXT_FIELDS = new Set(["type", "text"]);
 const IMAGE_FIELDS = new Set([

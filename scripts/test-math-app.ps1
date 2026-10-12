@@ -250,7 +250,7 @@ Assert-True ((Count-Matches $source '<input\b[^>]*\btype="password"') -eq 4) `
   "van keyOverlay-a ne sme postojati dodatno polje za API ključ"
 Assert-True ((Count-Matches $keyOverlay 'autocomplete="off"\s+autocapitalize="none"') -eq 4) `
   "API ključevi ne smeju tražiti password-manager sinhronizaciju ili autocapitalization"
-Assert-True ($keyOverlay -match '(?i)Gemini\s+3\.6\s+Flash') `
+Assert-True ($keyOverlay -match '(?i)Gemini\s+3\.8\s+Flash') `
   "naziv provajdera/modela sme biti prikazan u sekciji za API ključeve"
 Assert-True ($sourceOutsideKeyOverlay -notmatch '(?i)\bgemini\b') `
   "naziv provajdera/modela ne sme biti korisniku vidljiv van keyOverlay-a"
@@ -294,12 +294,16 @@ Assert-True ($source -match 'const\s+GENERATION_SETTINGS_STORAGE\s*=\s*\r?\n\s*"
   "generation podešavanja moraju imati zaseban trajni storage ključ"
 Assert-True ($source -match 'const\s+DEFAULT_GENERATION_SETTINGS\s*=\s*Object\.freeze\(\{[\s\S]{0,140}thinkingLevel:\s*"high"[\s\S]{0,100}codeExecution:\s*true') `
   "stare instalacije moraju podrazumevano ostati high + code execution"
-Assert-True ((Count-Matches $source 'data-thinking-level="(?:minimal|low|medium|high)"') -eq 4) `
-  "Settings mora nuditi tačno četiri dozvoljena thinking nivoa"
+Assert-True ((Count-Matches $source 'data-thinking-level="(?:low|medium|high)"') -eq 3) `
+  "Settings mora nuditi tačno tri dozvoljena thinking nivoa za 3.8 Flash"
+Assert-True ($source -notmatch 'data-thinking-level="minimal"') `
+  "Settings ne sme nuditi nepodržani minimal nivo"
 Assert-True ((Count-Matches $source 'data-code-execution="(?:true|false)"') -eq 2) `
   "Settings mora nuditi samo uključeno ili isključeno izvršavanje koda"
 Assert-True ($generationSettingsHelpers -match 'THINKING_LEVELS\.includes\(value\.thinkingLevel\)[\s\S]{0,180}DEFAULT_GENERATION_SETTINGS\.thinkingLevel') `
   "nepoznat thinking nivo mora pasti na dosadašnji high"
+Assert-True ($generationSettingsHelpers -match 'value\.thinkingLevel\s*===\s*"minimal"[\s\S]{0,60}\?\s*"low"') `
+  "ranije sačuvan minimal nivo mora preći na podržani low"
 Assert-True ($generationSettingsHelpers -match 'typeof\s+value\.codeExecution\s*===\s*"boolean"[\s\S]{0,180}DEFAULT_GENERATION_SETTINGS\.codeExecution') `
   "code execution mora prihvatiti samo pravi boolean i inače ostati uključen"
 Assert-True ($generationSettingsHelpers -match 'localStorage\.getItem\(GENERATION_SETTINGS_STORAGE\)[\s\S]{0,420}JSON\.parse\(stored\)[\s\S]{0,220}DEFAULT_GENERATION_SETTINGS') `
@@ -631,12 +635,12 @@ if (Test-Path -LiteralPath $localSecretFile) {
 
 Assert-True ($loader -notmatch 'window\.fetch\s*=|AbortSignal\.timeout|realSetTimeout') `
   "loader više ne sme sadržati Stop monkeypatch"
-Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=24') -eq 9) `
-  "loader mora koristiti svih 9 chunk URL-ova sa v=24"
-Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v30"') `
-  "service worker cache mora biti v30"
-Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=24') -eq 9) `
-  "service worker mora keširati svih 9 chunk URL-ova sa v=24"
+Assert-True ((Count-Matches $loader 'app-v5/part-[^''"]+\.txt\?v=25') -eq 9) `
+  "loader mora koristiti svih 9 chunk URL-ova sa v=25"
+Assert-True ($serviceWorker -match 'CACHE_NAME\s*=\s*"matematika-pwa-v31"') `
+  "service worker cache mora biti v31"
+Assert-True ((Count-Matches $serviceWorker 'app-v5/part-[^''"]+\.txt\?v=25') -eq 9) `
+  "service worker mora keširati svih 9 chunk URL-ova sa v=25"
 
 & (Join-Path $PSScriptRoot "build-math-app.ps1") -CheckOnly | Out-Null
 Write-Output "Sve statičke provere matematičke aplikacije su prošle."

@@ -9,13 +9,13 @@ const DOCS_DIR = path.join(WORKSPACE, 'docs');
 const FIXTURES_DIR = path.join(HERE, 'fixtures');
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 4173;
-const MODEL = 'gemini-3.6-flash';
+const MODEL = 'gemini-3.8-flash';
 const IMAGE_MODALITY_MESSAGE =
-  'Image input modality is not enabled for models/gemini-3.6-flash-agent';
+  'Image input modality is not enabled for models/gemini-3.8-flash-agent';
 const UNSUPPORTED_IMAGE_PAYLOAD_MESSAGE =
   'Unsupported image format/MIME';
 const HIGH_DEMAND_MESSAGE =
-  'gemini-3.6-flash is currently experiencing high demand, spikes in demand are usually temporary. Please try again later.';
+  'gemini-3.8-flash is currently experiencing high demand, spikes in demand are usually temporary. Please try again later.';
 const MARKDOWN_REPAIR_ANSWER = [
   '```',
   '### Drugi interval: \\(-2 \\le x < 1\\)',
@@ -1591,8 +1591,11 @@ export function createHarnessServer() {
               typeof browserGenerationSettings.code_execution === 'boolean'
             )
           );
-        const gatewayThinkingLevel =
+        const requestedThinkingLevel =
           browserGenerationSettings?.thinking_level ?? 'high';
+        const gatewayThinkingLevel = requestedThinkingLevel === 'minimal'
+          ? 'low'
+          : requestedThinkingLevel;
         const gatewayCodeExecution =
           browserGenerationSettings?.code_execution ?? true;
         const browserContract = isGateway
@@ -1961,7 +1964,7 @@ export function createHarnessServer() {
                 code: 409,
                 status: 'FAILED_PRECONDITION',
                 message:
-                  'Deterministic mock: expected API 1-4 on gemini-3.6-flash.'
+                  'Deterministic mock: expected API 1-4 on gemini-3.8-flash.'
               }
             });
             return;

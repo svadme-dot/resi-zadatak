@@ -35,7 +35,7 @@ test("valid public body is preserved and fixed upstream policy is injected", () 
   const upstream = buildUpstreamBody(publicBody);
 
   assert.equal(upstream.model, UPSTREAM_MODEL);
-  assert.equal(upstream.model, "gemini-3.6-flash");
+  assert.equal(upstream.model, "gemini-3.8-flash");
   assert.strictEqual(upstream.input, input);
   assert.equal(upstream.stream, true);
   assert.equal(upstream.store, true);
@@ -67,7 +67,7 @@ test("old and partial clients keep high thinking and code execution defaults", (
   }
 });
 
-test("generation settings allow each exact thinking level and a strict code-execution switch", () => {
+test("generation settings use supported thinking levels, map legacy minimal to low, and keep the code-execution switch", () => {
   for (const thinking_level of ["minimal", "low", "medium", "high"]) {
     const publicBody = validatePublicBody({
       ...validPublicBody(),
@@ -76,7 +76,7 @@ test("generation settings allow each exact thinking level and a strict code-exec
     const upstream = buildUpstreamBody(publicBody);
 
     assert.deepEqual(upstream.generation_config, {
-      thinking_level,
+      thinking_level: thinking_level === "minimal" ? "low" : thinking_level,
       thinking_summaries: "auto"
     });
     assert.deepEqual(upstream.tools, [{ type: "code_execution" }]);

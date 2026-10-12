@@ -6,11 +6,15 @@ Produkcijski Worker i četiri secrets objavljeni su 23.08.2026. nakon eksplicitn
 dozvole vlasnika. GitHub Pages build koristi stvarni Worker endpoint i prošao je
 završne statičke, E2E i produkcijske provere pre objavljivanja.
 
+Model je 12.10.2026. prebačen na `gemini-3.8-flash` za Worker i lokalne ključeve.
+Default ostaje High + code execution, bez Google Search grounding-a. Settings
+nudi Low, Medium i High, a stari `minimal` zahtevi se prevode u Low.
+
 - Frontend: `https://svadme-dot.github.io/resi-zadatak/`
 - Worker name: `resi-zadatak-api`
 - Produkcijski endpoint:
   `https://resi-zadatak-api.vasilije-demonjic.workers.dev/v1/interactions`
-- Proverena Worker verzija: `ae9315e1-7cd3-414c-98d9-f29e1cb2bc85`
+- Proverena Worker verzija: `9673c942-d703-432d-aa9e-66deaeda8f82`
 - Lokalni restore tag: `backup-before-secure-api-backend`
 - Restore tag pre opcione lokalne rezerve:
   `backup-before-local-api-fallback`
@@ -55,7 +59,11 @@ transporta usred istog zahteva.
 
 Settings odvojeno pamti i način generisanja u
 `matematika_generation_settings_v1`. Dozvoljeni thinking nivoi su samo
-`minimal`, `low`, `medium` i `high`, a `code_execution` je strogi boolean.
+`low`, `medium` i `high`, a `code_execution` je strogi boolean.
+Fiksni model je `gemini-3.8-flash`; dosadašnji default ostaje `high` uz
+uključen `code_execution`. Ranije sačuvan `minimal` u browseru prelazi na
+`low`. Worker i dalje prihvata `minimal` od starih klijenata i prevodi ga u
+`low` pre upstream poziva, jer ga 3.8 Flash ne podržava.
 Storage lokalnih API ključeva se pri promeni ovih opcija ne čita niti prepisuje.
 Model ostaje fiksan, Google Search alat se nikada ne dodaje, a svaka slika i
 dalje nosi fiksno `resolution: "high"`. Promena podešavanja poništava samo stare

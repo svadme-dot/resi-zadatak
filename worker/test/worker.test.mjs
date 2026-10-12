@@ -185,7 +185,7 @@ test("gateway injects the exact fixed model policy and sends only the selected s
   assert.equal(call.init.headers.Accept, "application/json");
   assert.equal(call.init.redirect, "manual");
   assert.equal(call.body.model, UPSTREAM_MODEL);
-  assert.strictEqual(call.body.model, "gemini-3.6-flash");
+  assert.strictEqual(call.body.model, "gemini-3.8-flash");
   assert.deepEqual(call.body.input, input);
   assert.equal(call.body.store, true);
   assert.equal(call.body.system_instruction, SYSTEM_INSTRUCTION);
@@ -234,7 +234,7 @@ test("gateway applies only the two validated generation settings while policy st
     assert.equal(body.grounding, undefined);
   }
 
-  assert.equal(calls[0].generation_config.thinking_level, "minimal");
+  assert.equal(calls[0].generation_config.thinking_level, "low");
   assert.equal(Object.hasOwn(calls[0], "tools"), false);
   assert.deepEqual(calls[1].generation_config, {
     thinking_level: "medium",
@@ -442,7 +442,7 @@ test("upstream non-2xx responses preserve useful status while sanitizing all det
             JSON.stringify({
               error: {
                 message:
-                  "Google Gemini gemini-3.6-flash at generativelanguage.googleapis.com " +
+                  "Google Gemini gemini-3.8-flash at generativelanguage.googleapis.com " +
                   "leaked canary-secret-slot-1 and stack trace"
               }
             }),
@@ -479,7 +479,7 @@ test("capability and stale-continuation errors get neutral actionable classifica
         new Response(
           JSON.stringify({
             error: {
-              message: "Image input modality is not enabled for models/gemini-3.6-flash-agent"
+              message: "Image input modality is not enabled for models/gemini-3.8-flash-agent"
             }
           }),
           { status: 400, headers: { "Content-Type": "application/json" } }
@@ -489,7 +489,7 @@ test("capability and stale-continuation errors get neutral actionable classifica
   assert.equal(capability.status, 422);
   const capabilityBody = await capability.text();
   assert.match(capabilityBody, /image input modality/i);
-  assert.doesNotMatch(capabilityBody, /gemini|3\.6/i);
+  assert.doesNotMatch(capabilityBody, /gemini|3\.8/i);
 
   const stale = await handleRequest(
     makeRequest({
@@ -565,7 +565,7 @@ test("ordinary 400 request messages are not broadened into fallback statuses", a
 });
 
 test("streaming stays incremental and sanitizes branding in metadata and answer text", async () => {
-  const answer = "Matematički sadržaj pominje Gemini 3.6 kao korisnički tekst.";
+  const answer = "Matematički sadržaj pominje Gemini 3.8 kao korisnički tekst.";
   let releaseSecond;
   const secondGate = new Promise(resolve => {
     releaseSecond = resolve;
@@ -587,7 +587,7 @@ test("streaming stays incremental and sanitizes branding in metadata and answer 
                 encoder.encode(
                   `data: ${JSON.stringify({
                     event_type: "step.delta",
-                    model: "gemini-3.6-flash",
+                    model: "gemini-3.8-flash",
                     delta: { type: "text", text: answer }
                   })}\n\n`
                 )
@@ -599,11 +599,11 @@ test("streaming stays incremental and sanitizes branding in metadata and answer 
                     event_type: "interaction.completed",
                     interaction: {
                       status: "failed",
-                      model: "gemini-3.6-flash",
+                      model: "gemini-3.8-flash",
                       errors: [
                         {
                           code: "GEMINI_503",
-                          message: "Google Gemini 3.6 high demand, canary-secret-slot-1"
+                          message: "Google Gemini 3.8 high demand, canary-secret-slot-1"
                         }
                       ],
                       steps: completedInteraction(answer).steps
@@ -651,7 +651,7 @@ test("streaming stays incremental and sanitizes branding in metadata and answer 
 test("sync success strips metadata and neutralizes provider names in output text", async () => {
   const answer = "Odgovor korisniku sadrži reč Gemini i ostaje neizmenjen.";
   const interaction = completedInteraction(answer);
-  interaction.model = "gemini-3.6-flash";
+  interaction.model = "gemini-3.8-flash";
   interaction.provider = "Google";
 
   const response = await handleRequest(

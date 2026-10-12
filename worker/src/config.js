@@ -1,4 +1,4 @@
-export const UPSTREAM_MODEL = "gemini-3.6-flash";
+export const UPSTREAM_MODEL = "gemini-3.8-flash";
 
 export const UPSTREAM_INTERACTIONS_URL =
   "https://generativelanguage.googleapis.com/v1beta/interactions";
@@ -34,8 +34,11 @@ export const MAX_SYNC_RESPONSE_BYTES = 1024 * 1024;
 export const DEFAULT_UPSTREAM_TIMEOUT_MS = 120_000;
 
 export function buildUpstreamBody(publicBody) {
-  const thinkingLevel =
+  const requestedThinkingLevel =
     publicBody.generation_settings?.thinking_level ?? "high";
+  // Older clients can still send minimal; 3.8 Flash's lowest level is low.
+  const thinkingLevel =
+    requestedThinkingLevel === "minimal" ? "low" : requestedThinkingLevel;
   const codeExecution =
     publicBody.generation_settings?.code_execution ?? true;
 
